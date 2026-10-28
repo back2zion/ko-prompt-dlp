@@ -1,0 +1,154 @@
+"""AX Filter prototype API."""
+from __future__ import annotations
+
+import hmac
+import os
+import secrets
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Literal
+
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from pydantic import BaseModel, Field
+
+from .policy import Policy, evaluate
+from .store import Store, load_or_create_key
+
+PERIOD_DAYS = {"today": 1, "week": 7, "month": 30, "quarter": 90}
+ROLE_RANK = {"agent": 0, "viewer": 1, "admin": 2}
+
+
+@dataclass
+class Config:
+    db_path: str
+    data_key: bytes
+    api_keys: dict[str, str]  # role -> key
+
+
+def config_from_env() -> Config:
+    data_dir = Path(os.environ.get("AXFILTER_DATA_DIR", "data"))
+    data_dir.mkdir(parents=True, exist_ok=True)
+    keys = {}
+    for role in ROLE_RANK:
+        k = os.environ.get(f"AXFILTER_{role.upper()}_KEY")
+        if not k:
+            k = secrets.token_urlsafe(24)
+            print(f"[axfilter] AXFILTER_{role.upper()}_KEY not set; temporary {role} key: {k}")
+        keys[role] = k
+    return Config(str(data_dir / "axfilter.db"), load_or_create_key(data_dir / "data.key"), keys)
+
+
+class InspectRequest(BaseModel):
+    service: str = Field(min_length=1, max_length=64)
+    user: str = Field(default="unknown", max_length=128)
+    ip: str = Field(max_length=64)
+    text: str = Field(max_length=200_000)
+    direction: Literal["input", "output"] = "input"
+
+
+def create_app(cfg: Config) -> FastAPI:
+    app = FastAPI(title="AX Filter prototype")
+    store = Store(cfg.db_path, cfg.data_key)
+
+    def require(min_role: str):
+        def dep(x_api_key: str = Header(default="")) -> str:
+            for role, key in cfg.api_keys.items():
+                if hmac.compare_digest(x_api_key, key):
+                    if ROLE_RANK[role] >= ROLE_RANK[min_role]:
+                        return role
+                    raise HTTPException(403, "insufficient role")
+            raise HTTPException(401, "invalid api key")
+        return dep
+
+    @app.post("/v1/inspect")
+    def inspect(req: InspectRequest, _: str = Depends(require("agent"))):
+        t0 = time.perf_counter()
+        policy = store.get_policy()
+        d = evaluate(policy, service=req.service, ip=req.ip, text=req.text)
+        types = sorted({f.type for f in d.findings})
+        latency = (time.perf_counter() - t0) * 1000
+        event_id = store.add_event(
+            service=req.service.strip().lower(), user=req.user, ip=req.ip, group=d.group,
+            direction=req.direction, action=d.action, reason=d.reason, finding_types=types,
+            latency_ms=latency, masked_text=d.forward_text, original=req.text)
+        return {
+            "event_id": event_id, "action": d.action, "reason": d.reason,
+            "text": d.forward_text,  # None when blocked
+            "message": policy.block_message if d.action == "block" else None,
+            "findings": [{"type": f.type, "label": f.label, "start": f.start, "end": f.end}
+                         for f in d.findings],
+        }
+
+    # ---- statistics (viewer+) -------------------------------------------
+    def since(period: str) -> int:
+        if period not in PERIOD_DAYS:
+            raise HTTPException(422, f"period must be one of {sorted(PERIOD_DAYS)}")
+        return int(time.time()) - PERIOD_DAYS[period] * 86400
+
+    Direction = Literal["all", "input", "output"]
+
+    @app.get("/v1/stats/summary")
+    def summary(period: str = "week", direction: Direction = "all",
+                _: str = Depends(require("viewer"))):
+        cur = store.summary(since(period), direction)
+        prev_since = since(period) - PERIOD_DAYS[period] * 86400
+        prev_total = store.summary(prev_since, direction)["total"] - cur["total"]
+        change = None if prev_total <= 0 else round((cur["total"] / prev_total - 1) * 100, 1)
+        t = cur["total"] or 1
+        return {**cur, "detect_rate": round(cur["detected"] / t * 100, 1),
+                "allow_rate": round(cur["allowed"] / t * 100, 1),
+                "block_rate": round(cur["blocked"] / t * 100, 1),
+                "mask_rate": round(cur["masked"] / t * 100, 1),
+                "prev_period_change_pct": change}
+
+    @app.get("/v1/stats/daily")
+    def daily(period: str = "week", direction: Direction = "all",
+              _: str = Depends(require("viewer"))):
+        return store.daily(since(period), direction)
+
+    @app.get("/v1/stats/services")
+    def services(period: str = "week", direction: Direction = "all",
+                 _: str = Depends(require("viewer"))):
+        return store.by_service(since(period), direction)
+
+    @app.get("/v1/stats/top")
+    def top(by: Literal["group", "ip"] = "group", period: str = "week",
+            direction: Direction = "all", n: int = Query(5, ge=1, le=50),
+            _: str = Depends(require("viewer"))):
+        return store.top(since(period), direction, by, n)
+
+    @app.get("/v1/events")
+    def events(limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
+               action: Literal["allow", "mask", "block"] | None = None,
+               _: str = Depends(require("viewer"))):
+        return store.list_events(limit, offset, action)
+
+    # ---- admin ----------------------------------------------------------
+    @app.get("/v1/events/{event_id}/original")
+    def original(event_id: int, role: str = Depends(require("admin"))):
+        row = store.get_event(event_id)
+        if row is None:
+            raise HTTPException(404, "event not found")
+        store.audit(role, "VIEW_ORIGINAL", f"event:{event_id}")
+        return {"event_id": event_id, "original": store.decrypt_original(row)}
+
+    @app.get("/v1/policy")
+    def get_policy(_: str = Depends(require("viewer"))):
+        return store.get_policy()
+
+    @app.put("/v1/policy")
+    def put_policy(policy: Policy, role: str = Depends(require("admin"))):
+        store.set_policy(policy)
+        store.audit(role, "UPDATE_POLICY", "policy")
+        return policy
+
+    @app.get("/v1/audit")
+    def audit(_: str = Depends(require("admin"))):
+        return {"verify": store.verify_audit(), "entries": store.audit_entries()}
+
+    @app.get("/healthz")
+    def healthz():
+        return {"ok": True}
+
+    return app
