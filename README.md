@@ -29,3 +29,13 @@ python -m pytest
 ## 한계
 - 정규식·체크섬 기반이라 이름, 주소, 비정형 기밀은 검출하지 못함
 - 데이터 키 관리(KMS), TLS, 인증 연동, 부하 검증은 미구현
+
+## assetcheck/
+자사 자산 노출 점검 (`assetcheck.py`): 위험 포트 개방 여부, HTTP Basic 기본 비밀번호 허용 여부.
+스코프 파일(IP/CIDR, 최대 /24)과 `--confirm-authorized` 없이는 실행되지 않으며, 공인 IP는 `--allow-public`이 필요합니다.
+소유했거나 서면으로 점검 권한을 받은 자산에만 사용하세요.
+
+```
+python3 assetcheck.py --scope scope.txt --confirm-authorized
+python3 -m pytest
+```
