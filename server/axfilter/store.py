@@ -11,6 +11,7 @@ from pathlib import Path
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+from .keys import KeyProvider
 from .policy import Policy
 
 SCHEMA = """
@@ -58,12 +59,49 @@ def load_or_create_key(path: Path) -> bytes:
 
 
 class Store:
-    def __init__(self, db_path: str | Path, key: bytes):
-        self._aes = AESGCM(key)
+    def __init__(self, db_path: str | Path, provider: KeyProvider):
+        self._provider = provider
         self._lock = threading.Lock()
         self._db = sqlite3.connect(str(db_path), check_same_thread=False)
         self._db.row_factory = sqlite3.Row
         self._db.executescript(SCHEMA)
+        self._aes = AESGCM(self._load_or_create_dek())
+
+    # ---- data encryption key (envelope) ---------------------------------
+    def _load_or_create_dek(self) -> bytes:
+        row = self._db.execute("SELECT v FROM kv WHERE k='dek'").fetchone()
+        if row:
+            return self._provider.unwrap(bytes.fromhex(row["v"]))
+        dek = os.urandom(32)
+        with self._db:
+            self._db.execute("INSERT INTO kv(k,v) VALUES('dek',?)",
+                             (self._provider.wrap(dek).hex(),))
+        return dek
+
+    def rotate_data_key(self) -> int:
+        """Generate a new DEK, re-encrypt every stored original, store the new wrapped DEK.
+
+        Returns the number of re-encrypted rows. Runs in one transaction so a crash
+        leaves either the old or the new key fully in effect.
+        """
+        new_dek = os.urandom(32)
+        new_aes = AESGCM(new_dek)
+        with self._lock, self._db:
+            rows = self._db.execute(
+                "SELECT id, nonce, original_enc FROM events WHERE original_enc IS NOT NULL").fetchall()
+            for r in rows:
+                plain = self._aes.decrypt(r["nonce"], r["original_enc"], None)
+                nonce = os.urandom(12)
+                self._db.execute("UPDATE events SET nonce=?, original_enc=? WHERE id=?",
+                                 (nonce, new_aes.encrypt(nonce, plain, None), r["id"]))
+            self._db.execute("INSERT OR REPLACE INTO kv(k,v) VALUES('dek',?)",
+                             (self._provider.wrap(new_dek).hex(),))
+            self._aes = new_aes
+        return len(rows)
+
+    @property
+    def key_provider_name(self) -> str:
+        return self._provider.name
 
     # ---- policy -------------------------------------------------------
     def get_policy(self) -> Policy:

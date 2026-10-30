@@ -13,6 +13,7 @@ from typing import Literal
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
+from .keys import KeyProvider, LocalMasterKeyProvider, provider_from_env
 from .policy import Policy, evaluate
 from .store import Store, load_or_create_key
 
@@ -28,6 +29,9 @@ class Config:
     max_auth_failures: int = 10      # per client IP within the window
     auth_window_seconds: float = 300.0
     auth_lockout_seconds: float = 300.0
+    key_provider: KeyProvider | None = None   # default: local master key = data_key
+    require_tls: bool = False                 # reject plain-HTTP requests
+    trusted_proxy: bool = False               # honour X-Forwarded-Proto from a TLS-terminating proxy
 
 
 def config_from_env() -> Config:
@@ -40,7 +44,11 @@ def config_from_env() -> Config:
             k = secrets.token_urlsafe(24)
             print(f"[axfilter] AXFILTER_{role.upper()}_KEY not set; temporary {role} key: {k}")
         keys[role] = k
-    return Config(str(data_dir / "axfilter.db"), load_or_create_key(data_dir / "data.key"), keys)
+    local_key = load_or_create_key(data_dir / "data.key")
+    return Config(str(data_dir / "axfilter.db"), local_key, keys,
+                  key_provider=provider_from_env(local_key),
+                  require_tls=os.environ.get("AXFILTER_REQUIRE_TLS", "0") == "1",
+                  trusted_proxy=os.environ.get("AXFILTER_TRUSTED_PROXY", "0") == "1")
 
 
 class InspectRequest(BaseModel):
@@ -53,13 +61,25 @@ class InspectRequest(BaseModel):
 
 def create_app(cfg: Config) -> FastAPI:
     app = FastAPI(title="AX Filter prototype")
-    store = Store(cfg.db_path, cfg.data_key)
+    provider = cfg.key_provider or LocalMasterKeyProvider(cfg.data_key)
+    store = Store(cfg.db_path, provider)
+
+    def _is_https(request: Request) -> bool:
+        if request.url.scheme == "https":
+            return True
+        return cfg.trusted_proxy and request.headers.get("x-forwarded-proto", "").lower() == "https"
     fails: dict[str, deque] = {}          # client ip -> timestamps of bad keys
     locked: dict[str, float] = {}         # client ip -> lock-until monotonic time
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
-        resp = await call_next(request)
+        if cfg.require_tls and not _is_https(request):
+            resp = Response("TLS required", status_code=426, media_type="text/plain")
+            resp.headers["Upgrade"] = "TLS/1.2, HTTP/1.1"
+        else:
+            resp = await call_next(request)
+        if _is_https(request):
+            resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         resp.headers["X-Content-Type-Options"] = "nosniff"
         resp.headers["X-Frame-Options"] = "DENY"
         resp.headers["Referrer-Policy"] = "no-referrer"
@@ -178,6 +198,12 @@ def create_app(cfg: Config) -> FastAPI:
         store.set_policy(policy)
         store.audit(role, "UPDATE_POLICY", "policy")
         return policy
+
+    @app.post("/v1/keys/rotate")
+    def rotate_key(role: str = Depends(require("admin"))):
+        n = store.rotate_data_key()
+        store.audit(role, "ROTATE_DATA_KEY", f"reencrypted:{n}")
+        return {"reencrypted": n, "provider": store.key_provider_name}
 
     @app.get("/v1/audit")
     def audit(_: str = Depends(require("admin"))):
