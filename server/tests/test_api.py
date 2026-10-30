@@ -93,3 +93,40 @@ def test_audit_tamper_detected(client, tmp_path):
     db.execute("UPDATE audit SET actor='nobody' WHERE id=1")
     db.commit()
     assert client.get("/v1/audit", headers=h("admin")).json()["verify"] == {"ok": False, "broken_at": 1}
+
+
+def test_secret_and_passport_blocked(client):
+    assert inspect(client, "AKIAIOSFODNN7EXAMPLE")["action"] == "block"
+    assert inspect(client, "여권 M12345678")["action"] == "block"
+
+
+def test_security_headers_present(client):
+    r = client.get("/healthz")
+    assert r.headers["X-Content-Type-Options"] == "nosniff"
+    assert r.headers["X-Frame-Options"] == "DENY"
+    assert r.headers["Cache-Control"] == "no-store"
+
+
+def test_bruteforce_lockout_then_cooldown(tmp_path):
+    cfg = Config(str(tmp_path / "t.db"), b"\x03" * 32, KEYS,
+                 max_auth_failures=3, auth_window_seconds=300, auth_lockout_seconds=300)
+    c = TestClient(create_app(cfg))
+    body = {"service": "ChatGPT", "user": "x", "ip": "10.0.0.1", "text": "hi"}
+    for _ in range(3):
+        assert c.post("/v1/inspect", headers={"X-API-Key": "wrong"}, json=body).status_code == 401
+    # now locked -> even a VALID key is refused with 429 during cooldown
+    assert c.post("/v1/inspect", headers={"X-API-Key": "wrong"}, json=body).status_code == 429
+    assert c.post("/v1/inspect", headers=h("agent"), json=body).status_code == 429
+
+
+def test_successful_auth_resets_failures(tmp_path):
+    cfg = Config(str(tmp_path / "t.db"), b"\x04" * 32, KEYS,
+                 max_auth_failures=3, auth_window_seconds=300, auth_lockout_seconds=300)
+    c = TestClient(create_app(cfg))
+    body = {"service": "ChatGPT", "user": "x", "ip": "10.0.0.1", "text": "hi"}
+    for _ in range(2):
+        c.post("/v1/inspect", headers={"X-API-Key": "wrong"}, json=body)
+    assert c.post("/v1/inspect", headers=h("agent"), json=body).status_code == 200
+    # counter reset: two more bad tries should not lock yet
+    for _ in range(2):
+        assert c.post("/v1/inspect", headers={"X-API-Key": "wrong"}, json=body).status_code == 401

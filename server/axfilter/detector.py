@@ -11,6 +11,8 @@ LABELS = {
     "PHONE": "전화번호",
     "EMAIL": "이메일",
     "BIZNO": "사업자등록번호",
+    "PASSPORT": "여권번호",
+    "SECRET": "자격증명/비밀키",
     "KEYWORD": "사내 키워드",
 }
 
@@ -74,6 +76,22 @@ _PHONE = re.compile(r"(?<!\d)(?:01[016789]|0(?:2|[3-6][1-5]|70|80))[-.\s]?\d{3,4
 _EMAIL = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,}")
 _BIZNO = re.compile(r"(?<!\d)\d{3}-\d{2}-\d{5}(?!\d)")
 
+# Korean passport: one letter (M/S/R/O/D/G) + 8 digits (and newer 2-letter forms).
+_PASSPORT = re.compile(r"(?<![A-Za-z0-9])[MSRODGmsrodg][0-9]{8}(?![0-9])")
+
+# Credential / secret leakage — the most common real-world leak into AI chats.
+_SECRET_PATTERNS = [
+    re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----"),
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),                       # AWS access key id
+    re.compile(r"\bASIA[0-9A-Z]{16}\b"),                       # AWS temp key id
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b"),             # GitHub tokens
+    re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"),           # Slack tokens
+    re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b"),  # JWT
+    # key=value style assignments for sensitive names
+    re.compile(r"(?i)\b(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?token|"
+               r"private[_-]?key|client[_-]?secret)\b\s*[:=]\s*['\"]?[^\s'\"]{6,}"),
+]
+
 
 def _scan(text: str, keywords: list[str]) -> list[Finding]:
     out: list[Finding] = []
@@ -102,6 +120,13 @@ def _scan(text: str, keywords: list[str]) -> list[Finding]:
 
     for m in _EMAIL.finditer(text):
         out.append(Finding("EMAIL", m.start(), m.end()))
+
+    for m in _PASSPORT.finditer(text):
+        out.append(Finding("PASSPORT", m.start(), m.end()))
+
+    for pat in _SECRET_PATTERNS:
+        for m in pat.finditer(text):
+            out.append(Finding("SECRET", m.start(), m.end()))
 
     lowered = text.lower()
     for kw in keywords:

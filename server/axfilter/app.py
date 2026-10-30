@@ -5,11 +5,12 @@ import hmac
 import os
 import secrets
 import time
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
 from .policy import Policy, evaluate
@@ -24,6 +25,9 @@ class Config:
     db_path: str
     data_key: bytes
     api_keys: dict[str, str]  # role -> key
+    max_auth_failures: int = 10      # per client IP within the window
+    auth_window_seconds: float = 300.0
+    auth_lockout_seconds: float = 300.0
 
 
 def config_from_env() -> Config:
@@ -50,14 +54,46 @@ class InspectRequest(BaseModel):
 def create_app(cfg: Config) -> FastAPI:
     app = FastAPI(title="AX Filter prototype")
     store = Store(cfg.db_path, cfg.data_key)
+    fails: dict[str, deque] = {}          # client ip -> timestamps of bad keys
+    locked: dict[str, float] = {}         # client ip -> lock-until monotonic time
+
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        resp = await call_next(request)
+        resp.headers["X-Content-Type-Options"] = "nosniff"
+        resp.headers["X-Frame-Options"] = "DENY"
+        resp.headers["Referrer-Policy"] = "no-referrer"
+        resp.headers["Cache-Control"] = "no-store"
+        resp.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
+        return resp
+
+    def _client(request: Request) -> str:
+        return request.client.host if request.client else "unknown"
+
+    def _note_failure(ip: str, now: float) -> None:
+        dq = fails.setdefault(ip, deque())
+        dq.append(now)
+        while dq and now - dq[0] > cfg.auth_window_seconds:
+            dq.popleft()
+        if len(dq) >= cfg.max_auth_failures:
+            locked[ip] = now + cfg.auth_lockout_seconds
+            dq.clear()
 
     def require(min_role: str):
-        def dep(x_api_key: str = Header(default="")) -> str:
+        def dep(request: Request, x_api_key: str = Header(default="")) -> str:
+            ip, now = _client(request), time.monotonic()
+            until = locked.get(ip)
+            if until is not None:
+                if now < until:
+                    raise HTTPException(429, "too many failed authentications; try again later")
+                del locked[ip]
             for role, key in cfg.api_keys.items():
                 if hmac.compare_digest(x_api_key, key):
+                    fails.pop(ip, None)
                     if ROLE_RANK[role] >= ROLE_RANK[min_role]:
                         return role
                     raise HTTPException(403, "insufficient role")
+            _note_failure(ip, now)
             raise HTTPException(401, "invalid api key")
         return dep
 

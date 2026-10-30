@@ -55,3 +55,31 @@ def test_mask_replaces_with_labels():
 def test_mask_only_selected_types():
     t = "a@b.com 010-1234-5678"
     assert mask(t, detect(t), {"EMAIL"}) == "[이메일] 010-1234-5678"
+
+
+def test_passport_detected():
+    assert types("여권 M12345678 소지") == ["PASSPORT"]
+    assert types("코드 Z12345678") == []  # not a passport letter
+
+
+def test_secret_aws_key_blocked_type():
+    assert types("key AKIAIOSFODNN7EXAMPLE here") == ["SECRET"]
+
+
+def test_secret_private_key_header():
+    assert types("-----BEGIN RSA PRIVATE KEY-----") == ["SECRET"]
+
+
+def test_secret_key_value_assignment():
+    assert types("password = s3cr3tValue") == ["SECRET"]
+    assert types('api_key: "abcdef123456"') == ["SECRET"]
+
+
+def test_secret_jwt():
+    jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abcDEF123456"
+    assert "SECRET" in types(f"token {jwt}")
+
+
+def test_mask_passport_and_secret_labels():
+    t = "여권 M12345678 키 AKIAIOSFODNN7EXAMPLE"
+    assert mask(t, detect(t)) == "여권 [여권번호] 키 [자격증명/비밀키]"

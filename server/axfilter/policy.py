@@ -32,7 +32,8 @@ class Policy(BaseModel):
     services: dict[str, Literal["allow", "block"]] = Field(default_factory=dict)
     type_actions: dict[str, Action] = Field(default_factory=lambda: {
         "RRN": "block", "CARD": "block", "PHONE": "mask",
-        "EMAIL": "mask", "BIZNO": "mask", "KEYWORD": "block",
+        "EMAIL": "mask", "BIZNO": "mask", "PASSPORT": "block",
+        "SECRET": "block", "KEYWORD": "block",
     })
     keywords: list[str] = Field(default_factory=list)
     groups: list[GroupDef] = Field(default_factory=list)
