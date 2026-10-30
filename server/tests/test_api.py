@@ -130,3 +130,11 @@ def test_successful_auth_resets_failures(tmp_path):
     # counter reset: two more bad tries should not lock yet
     for _ in range(2):
         assert c.post("/v1/inspect", headers={"X-API-Key": "wrong"}, json=body).status_code == 401
+
+
+def test_direction_query_param_accepted(client):
+    inspect(client, "mail a@b.com")
+    for d in ("all", "input", "output"):
+        assert client.get(f"/v1/stats/summary?direction={d}", headers=h("viewer")).status_code == 200
+    # invalid direction is rejected, not a 500
+    assert client.get("/v1/stats/summary?direction=sideways", headers=h("viewer")).status_code == 422

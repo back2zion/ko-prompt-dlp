@@ -18,6 +18,7 @@ from .policy import Policy, evaluate
 from .store import Store, load_or_create_key
 
 PERIOD_DAYS = {"today": 1, "week": 7, "month": 30, "quarter": 90}
+Direction = Literal["all", "input", "output"]
 ROLE_RANK = {"agent": 0, "viewer": 1, "admin": 2}
 
 
@@ -32,6 +33,7 @@ class Config:
     key_provider: KeyProvider | None = None   # default: local master key = data_key
     require_tls: bool = False                 # reject plain-HTTP requests
     trusted_proxy: bool = False               # honour X-Forwarded-Proto from a TLS-terminating proxy
+    cors_origins: tuple[str, ...] = ()        # dashboard origins allowed to call the API
 
 
 def config_from_env() -> Config:
@@ -48,7 +50,8 @@ def config_from_env() -> Config:
     return Config(str(data_dir / "axfilter.db"), local_key, keys,
                   key_provider=provider_from_env(local_key),
                   require_tls=os.environ.get("AXFILTER_REQUIRE_TLS", "0") == "1",
-                  trusted_proxy=os.environ.get("AXFILTER_TRUSTED_PROXY", "0") == "1")
+                  trusted_proxy=os.environ.get("AXFILTER_TRUSTED_PROXY", "0") == "1",
+                  cors_origins=tuple(o for o in os.environ.get("AXFILTER_CORS_ORIGINS", "").split(",") if o))
 
 
 class InspectRequest(BaseModel):
@@ -61,6 +64,10 @@ class InspectRequest(BaseModel):
 
 def create_app(cfg: Config) -> FastAPI:
     app = FastAPI(title="AX Filter prototype")
+    if cfg.cors_origins:
+        from fastapi.middleware.cors import CORSMiddleware
+        app.add_middleware(CORSMiddleware, allow_origins=list(cfg.cors_origins),
+                           allow_methods=["GET", "POST", "PUT"], allow_headers=["X-API-Key", "Content-Type"])
     provider = cfg.key_provider or LocalMasterKeyProvider(cfg.data_key)
     store = Store(cfg.db_path, provider)
 
@@ -141,8 +148,6 @@ def create_app(cfg: Config) -> FastAPI:
         if period not in PERIOD_DAYS:
             raise HTTPException(422, f"period must be one of {sorted(PERIOD_DAYS)}")
         return int(time.time()) - PERIOD_DAYS[period] * 86400
-
-    Direction = Literal["all", "input", "output"]
 
     @app.get("/v1/stats/summary")
     def summary(period: str = "week", direction: Direction = "all",

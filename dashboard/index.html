@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AX필터 대시보드</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  /* Security-ops dashboard: summary tiles over a trend chart, scanned not read.
+     Tokens first (light), then dark overrides. Accent = indigo; state colors are separate. */
+  :root {
+    --bg: #eef1f6; --surface: #ffffff; --surface-2: #f7f9fc;
+    --ink: #1a2233; --ink-soft: #46506a; --muted: #6b7687; --line: #e3e8f0;
+    --accent: #3b5bdb; --accent-soft: #e7ecfe;
+    --allow: #2f9e6f; --detect: #3b5bdb; --block: #e03131; --mask: #e8a13a;
+    --shadow: 0 1px 2px rgba(20,30,60,.05), 0 8px 24px rgba(20,30,60,.05);
+    --r: 14px; --font: "IBM Plex Sans KR", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  :root { --ink-soft: #46506a; --muted: #6b7687; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #0e1320; --surface: #161d2e; --surface-2: #1b2334;
+      --ink: #e8edf6; --ink-soft: #b9c2d6; --muted: #8893a8; --line: #27304559;
+      --line: #2a3345; --accent: #7d94f6; --accent-soft: #23304f;
+      --allow: #4bd39a; --detect: #7d94f6; --block: #ff7076; --mask: #f3bd6a;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 28px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #0e1320; --surface: #161d2e; --surface-2: #1b2334;
+    --ink: #e8edf6; --ink-soft: #b9c2d6; --muted: #8893a8; --line: #2a3345;
+    --accent: #7d94f6; --accent-soft: #23304f;
+    --allow: #4bd39a; --detect: #7d94f6; --block: #ff7076; --mask: #f3bd6a;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 28px rgba(0,0,0,.35);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg); color: var(--ink); font-family: var(--font);
+    font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased;
+    font-variant-numeric: tabular-nums;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 20px 16px 56px; }
+
+  header.top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .logo { width: 30px; height: 30px; border-radius: 8px; background: var(--accent);
+    display: grid; place-items: center; color: #fff; font-weight: 700; }
+  .brand h1 { font-size: 18px; font-weight: 700; margin: 0; letter-spacing: -.01em; }
+  .brand .sub { color: var(--muted); font-size: 12.5px; }
+  .spacer { flex: 1 1 auto; }
+  .conn { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--mask); }
+  .dot.live { background: var(--allow); }
+  button, .tab { font-family: inherit; cursor: pointer; }
+  .btn { border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+    border-radius: 9px; padding: 7px 12px; font-size: 12.5px; font-weight: 500; }
+  .btn:hover { border-color: var(--accent); }
+
+  .controls { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+  .segment { display: inline-flex; background: var(--surface); border: 1px solid var(--line);
+    border-radius: 10px; padding: 3px; gap: 2px; }
+  .segment button { border: 0; background: transparent; color: var(--ink-soft);
+    padding: 6px 13px; border-radius: 7px; font-size: 12.5px; font-weight: 500; }
+  .segment button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+
+  .cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 14px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
+    box-shadow: var(--shadow); padding: 15px 16px; }
+  .card .k { color: var(--muted); font-size: 12.5px; display: flex; align-items: center; gap: 6px; }
+  .card .v { font-size: 26px; font-weight: 700; margin: 7px 0 3px; letter-spacing: -.02em; }
+  .card .note { font-size: 12px; color: var(--muted); }
+  .stripe { width: 7px; height: 7px; border-radius: 2px; display: inline-block; }
+  .up { color: var(--allow); font-weight: 600; } .down { color: var(--block); font-weight: 600; }
+  .v.detect { color: var(--detect); } .v.allow { color: var(--allow); }
+  .v.block { color: var(--block); } .v.mask { color: var(--mask); }
+
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
+    box-shadow: var(--shadow); padding: 16px 18px; margin-bottom: 14px; }
+  .panel h2 { font-size: 14.5px; font-weight: 600; margin: 0 0 12px; }
+  .panel h2 .hint { color: var(--muted); font-weight: 400; font-size: 12px; margin-left: 8px; }
+
+  .chartrow { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--ink-soft); margin-bottom: 6px; }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  svg { width: 100%; height: auto; display: block; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { text-align: right; padding: 8px 9px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  thead th { color: var(--muted); font-weight: 500; font-size: 11.5px; }
+  tbody tr:last-child td { border-bottom: 0; }
+  .num.detect { color: var(--detect); } .num.allow { color: var(--allow); }
+  .num.block { color: var(--block); } .num.mask { color: var(--mask); }
+  .bar { display: inline-block; height: 7px; border-radius: 4px; background: var(--accent);
+    vertical-align: middle; margin-right: 7px; min-width: 2px; }
+  .rank { color: var(--muted); }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .tcap { font-size: 12px; color: var(--muted); margin: 0 0 8px; font-weight: 600; letter-spacing: .02em; }
+  .scroll { overflow-x: auto; }
+  footer { color: var(--muted); font-size: 11.5px; margin-top: 10px; text-align: center; }
+  dialog { border: 1px solid var(--line); border-radius: 14px; background: var(--surface);
+    color: var(--ink); max-width: 420px; width: calc(100% - 32px); box-shadow: var(--shadow); padding: 20px; }
+  dialog::backdrop { background: rgba(10,15,30,.5); }
+  dialog h3 { margin: 0 0 4px; font-size: 15px; }
+  dialog label { display: block; font-size: 12.5px; color: var(--ink-soft); margin: 12px 0 4px; }
+  dialog input { width: 100%; padding: 9px 11px; border: 1px solid var(--line); border-radius: 9px;
+    background: var(--surface-2); color: var(--ink); font-family: inherit; font-size: 13px; }
+  dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
+  .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .err { color: var(--block); font-size: 12px; margin-top: 10px; min-height: 16px; }
+  @media (max-width: 920px) {
+    .cards { grid-template-columns: repeat(2, 1fr); }
+    .chartrow, .two { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 460px) { .cards { grid-template-columns: 1fr; } }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <div class="logo">AX</div>
+      <div>
+        <h1>AX필터 대시보드</h1>
+        <div class="sub">생성형 AI 서비스 활용 현황을 통합 조회합니다.</div>
+      </div>
+    </div>
+    <div class="spacer"></div>
+    <div class="conn"><span class="dot" id="dot"></span><span id="connText">데모 데이터</span></div>
+    <button class="btn" id="cfgBtn">서버 연결</button>
+  </header>
+
+  <div class="controls">
+    <div class="segment" id="periodSeg" role="group" aria-label="기간">
+      <button data-period="today">오늘</button>
+      <button data-period="week" aria-pressed="true">일주일</button>
+      <button data-period="month">한달</button>
+      <button data-period="quarter">3개월</button>
+    </div>
+    <div class="segment" id="dirSeg" role="group" aria-label="방향">
+      <button data-dir="all" aria-pressed="true">전체</button>
+      <button data-dir="input">입력 프롬프트</button>
+      <button data-dir="output">출력 프롬프트</button>
+    </div>
+  </div>
+
+  <section class="cards" id="cards"></section>
+
+  <section class="panel">
+    <h2>기간별 처리 건수 <span class="hint" id="rangeHint"></span></h2>
+    <div class="legend">
+      <span><i class="stripe" style="background:var(--detect)"></i>총 처리</span>
+      <span><i class="stripe" style="background:var(--allow)"></i>허용</span>
+      <span><i class="stripe" style="background:var(--mask)"></i>마스킹</span>
+      <span><i class="stripe" style="background:var(--block)"></i>차단</span>
+    </div>
+    <div class="chartrow">
+      <div id="chart"></div>
+      <div class="scroll">
+        <table id="dailyTable"><thead><tr>
+          <th>날짜</th><th>총 처리</th><th>허용</th><th>마스킹</th><th>차단</th>
+        </tr></thead><tbody></tbody></table>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>AI 서비스별 현황</h2>
+    <div class="scroll">
+      <table id="svcTable"><thead><tr>
+        <th>AI 서비스</th><th>총 처리</th><th>검출</th><th>허용</th><th>차단</th><th>마스킹</th><th>평균 처리 속도</th>
+      </tr></thead><tbody></tbody></table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>사용량 Top 5</h2>
+    <div class="two">
+      <div>
+        <p class="tcap">그룹별</p>
+        <div class="scroll"><table id="grpTable"><thead><tr>
+          <th>순위</th><th>그룹</th><th>사용자</th><th>총 처리</th><th>검출</th><th>차단</th>
+        </tr></thead><tbody></tbody></table></div>
+      </div>
+      <div>
+        <p class="tcap">IP별</p>
+        <div class="scroll"><table id="ipTable"><thead><tr>
+          <th>순위</th><th>IP</th><th>그룹</th><th>총 처리</th><th>검출</th><th>차단</th>
+        </tr></thead><tbody></tbody></table></div>
+      </div>
+    </div>
+  </section>
+
+  <footer id="foot">표시된 수치는 합성 데모 데이터입니다. 실제 개인정보는 포함되지 않습니다.</footer>
+</div>
+
+<dialog id="cfg">
+  <h3>AX필터 서버 연결</h3>
+  <div class="sub" style="color:var(--muted);font-size:12.5px">조회(viewer) 권한 API 키로 통계 API에 연결합니다. 키는 이 브라우저에만 저장됩니다.</div>
+  <label for="apiBase">API 주소</label>
+  <input id="apiBase" placeholder="https://axfilter.example.com" />
+  <label for="apiKey">조회용 API 키 (viewer)</label>
+  <input id="apiKey" type="password" placeholder="X-API-Key" />
+  <div class="err" id="cfgErr"></div>
+  <div class="row">
+    <button class="btn" id="useDemo">데모로 보기</button>
+    <button class="btn" id="cfgCancel">취소</button>
+    <button class="btn primary" id="cfgSave">연결</button>
+  </div>
+</dialog>
+
+<script src="./demo-data.js"></script>
+<script>
+(function () {
+  "use strict";
+  var LS = "axfilter.dashboard.conn";
+  var state = { period: "week", dir: "all", conn: null };
+  var PERIOD_LABEL = { today: "오늘", week: "최근 7일", month: "최근 30일", quarter: "최근 90일" };
+  var fmt = function (n) { return (n == null ? 0 : n).toLocaleString("ko-KR"); };
+  var SVC_NAME = { chatgpt: "ChatGPT", claude: "Claude", gemini: "Gemini",
+    copilot: "Copilot", perplexity: "Perplexity" };
+
+  try { state.conn = JSON.parse(localStorage.getItem(LS) || "null"); } catch (e) { state.conn = null; }
+
+  function qs(id) { return document.getElementById(id); }
+
+  function setPressed(seg, attr, val) {
+    seg.querySelectorAll("button").forEach(function (b) {
+      b.setAttribute("aria-pressed", b.dataset[attr] === val ? "true" : "false");
+    });
+  }
+
+  async function fetchView() {
+    var c = state.conn;
+    if (!c || !c.base) return window.AXFILTER_DEMO[state.period][state.dir];
+    var base = c.base.replace(/\/$/, "");
+    var h = { "X-API-Key": c.key };
+    var q = "period=" + state.period + "&direction=" + state.dir;
+    async function g(path) {
+      var r = await fetch(base + path + (path.indexOf("?") < 0 ? "?" : "&") + q, { headers: h });
+      if (!r.ok) throw new Error(path + " → HTTP " + r.status);
+      return r.json();
+    }
+    var res = await Promise.all([
+      g("/v1/stats/summary"), g("/v1/stats/daily"), g("/v1/stats/services"),
+      g("/v1/stats/top?by=group&n=5"), g("/v1/stats/top?by=ip&n=5")
+    ]);
+    return { summary: res[0], daily: res[1], services: res[2], top_group: res[3], top_ip: res[4] };
+  }
+
+  function card(k, stripe, val, cls, note) {
+    return '<div class="card"><div class="k">' +
+      (stripe ? '<i class="stripe" style="background:' + stripe + '"></i>' : "") + k +
+      '</div><div class="v ' + (cls || "") + '">' + val + '</div><div class="note">' + note + '</div></div>';
+  }
+
+  function renderCards(s) {
+    var ch = s.prev_period_change_pct;
+    var chTxt = ch == null ? "비교 기준 없음"
+      : '전기간 대비 <span class="' + (ch >= 0 ? "up" : "down") + '">' +
+        (ch >= 0 ? "▲ " : "▼ ") + Math.abs(ch).toFixed(1) + "%</span>";
+    qs("cards").innerHTML =
+      card("총 프롬프트 처리 수", "var(--detect)", fmt(s.total), "", chTxt) +
+      card("개인정보 검출 수", "var(--detect)", fmt(s.detected), "detect", "검출율 " + s.detect_rate + "%") +
+      card("허용 프롬프트 수", "var(--allow)", fmt(s.allowed), "allow", "처리율 " + s.allow_rate + "%") +
+      card("차단 프롬프트 수", "var(--block)", fmt(s.blocked), "block", "처리율 " + s.block_rate + "%") +
+      card("마스킹 처리 수", "var(--mask)", fmt(s.masked), "mask", "처리율 " + s.mask_rate + "%");
+  }
+
+  function cssv(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+
+  function renderChart(daily) {
+    var W = 560, H = 230, PT = 16, PR = 12, PB = 26, PL = 44;
+    var days = daily.slice();
+    if (days.length === 0) { qs("chart").innerHTML = '<p style="color:var(--muted)">데이터 없음</p>'; return; }
+    var series = [
+      { key: "total", color: cssv("--detect") },
+      { key: "allowed", color: cssv("--allow") },
+      { key: "masked", color: cssv("--mask") },
+      { key: "blocked", color: cssv("--block") }
+    ];
+    var max = 0;
+    days.forEach(function (d) { series.forEach(function (s) { if (d[s.key] > max) max = d[s.key]; }); });
+    max = Math.max(max, 1);
+    var nice = Math.ceil(max / 4) * 4;
+    var x = function (i) { return PL + (W - PL - PR) * (days.length === 1 ? 0.5 : i / (days.length - 1)); };
+    var y = function (v) { return PT + (H - PT - PB) * (1 - v / nice); };
+    var svg = '<svg viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="기간별 처리 건수 추이">';
+    for (var g = 0; g <= 4; g++) {
+      var gv = nice * g / 4, gy = y(gv);
+      svg += '<line x1="' + PL + '" y1="' + gy + '" x2="' + (W - PR) + '" y2="' + gy +
+        '" stroke="' + cssv("--line") + '" stroke-width="1"/>';
+      svg += '<text x="' + (PL - 8) + '" y="' + (gy + 4) + '" text-anchor="end" font-size="10" fill="' +
+        cssv("--muted") + '">' + fmt(gv) + '</text>';
+    }
+    var step = Math.ceil(days.length / 7);
+    days.forEach(function (d, i) {
+      if (i % step === 0 || i === days.length - 1) {
+        svg += '<text x="' + x(i) + '" y="' + (H - 8) + '" text-anchor="middle" font-size="10" fill="' +
+          cssv("--muted") + '">' + d.day.slice(5) + '</text>';
+      }
+    });
+    series.forEach(function (s) {
+      var pts = days.map(function (d, i) { return x(i) + "," + y(d[s.key]); });
+      if (s.key === "allowed" || s.key === "total") {
+        var area = "M" + x(0) + "," + y(0) + " L" + pts.join(" L") + " L" + x(days.length - 1) + "," + y(0) + " Z";
+        svg += '<path d="' + area + '" fill="' + s.color + '" opacity="0.07"/>';
+      }
+      svg += '<polyline points="' + pts.join(" ") + '" fill="none" stroke="' + s.color +
+        '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
+      var li = days.length - 1;
+      svg += '<circle cx="' + x(li) + '" cy="' + y(days[li][s.key]) + '" r="3" fill="' + s.color + '"/>';
+    });
+    svg += "</svg>";
+    qs("chart").innerHTML = svg;
+  }
+
+  function renderDaily(daily) {
+    var rows = daily.slice(-7).map(function (d) {
+      return "<tr><td>" + d.day.slice(5) + "</td><td>" + fmt(d.total) +
+        '</td><td class="num allow">' + fmt(d.allowed) + '</td><td class="num mask">' + fmt(d.masked) +
+        '</td><td class="num block">' + fmt(d.blocked) + "</td></tr>";
+    }).join("");
+    qs("dailyTable").querySelector("tbody").innerHTML = rows;
+  }
+
+  function renderServices(svcs) {
+    var maxLat = Math.max.apply(null, svcs.map(function (s) { return s.avg_latency_ms || 0; }).concat([1]));
+    var rows = svcs.map(function (s) {
+      var lat = Math.round(s.avg_latency_ms || 0);
+      var w = Math.max(6, Math.round(70 * lat / maxLat));
+      return "<tr><td>" + (SVC_NAME[s.service] || s.service) + "</td><td>" + fmt(s.total) +
+        '</td><td class="num detect">' + fmt(s.detected) + '</td><td class="num allow">' + fmt(s.allowed) +
+        '</td><td class="num block">' + fmt(s.blocked) + '</td><td class="num mask">' + fmt(s.masked) +
+        '</td><td><span class="bar" style="width:' + w + 'px"></span>' + fmt(lat) + "ms</td></tr>";
+    }).join("");
+    qs("svcTable").querySelector("tbody").innerHTML = rows;
+  }
+
+  function renderTop(tbl, rows, kind) {
+    var html = rows.map(function (r, i) {
+      var label = kind === "group" ? r.grp : r.ip;
+      var second = kind === "group" ? fmt(r.users) + "명" : (r.grp || "");
+      return '<tr><td class="rank">' + (i + 1) + "</td><td>" + label + "</td><td>" + second +
+        "</td><td>" + fmt(r.total) + '</td><td class="num detect">' + fmt(r.detected) +
+        '</td><td class="num block">' + fmt(r.blocked) + "</td></tr>";
+    }).join("");
+    qs(tbl).querySelector("tbody").innerHTML = html;
+  }
+
+  async function render() {
+    qs("rangeHint").textContent = PERIOD_LABEL[state.period];
+    var view;
+    try {
+      view = await fetchView();
+    } catch (e) {
+      qs("connText").textContent = "연결 오류 — 데모 표시";
+      qs("dot").classList.remove("live");
+      view = window.AXFILTER_DEMO[state.period][state.dir];
+    }
+    renderCards(view.summary);
+    renderChart(view.daily);
+    renderDaily(view.daily);
+    renderServices(view.services);
+    renderTop("grpTable", view.top_group, "group");
+    renderTop("ipTable", view.top_ip, "ip");
+  }
+
+  function reflectConn() {
+    var live = !!(state.conn && state.conn.base);
+    qs("dot").classList.toggle("live", live);
+    qs("connText").textContent = live ? ("연결됨 · " + state.conn.base.replace(/^https?:\/\//, "")) : "데모 데이터";
+    qs("foot").textContent = live
+      ? "실시간 API 데이터입니다."
+      : "표시된 수치는 합성 데모 데이터입니다. 실제 개인정보는 포함되지 않습니다.";
+  }
+
+  // events
+  qs("periodSeg").addEventListener("click", function (e) {
+    var b = e.target.closest("button"); if (!b) return;
+    state.period = b.dataset.period; setPressed(qs("periodSeg"), "period", state.period); render();
+  });
+  qs("dirSeg").addEventListener("click", function (e) {
+    var b = e.target.closest("button"); if (!b) return;
+    state.dir = b.dataset.dir; setPressed(qs("dirSeg"), "dir", state.dir); render();
+  });
+  qs("cfgBtn").addEventListener("click", function () {
+    if (state.conn) { qs("apiBase").value = state.conn.base || ""; qs("apiKey").value = state.conn.key || ""; }
+    qs("cfgErr").textContent = ""; qs("cfg").showModal();
+  });
+  qs("cfgCancel").addEventListener("click", function () { qs("cfg").close(); });
+  qs("useDemo").addEventListener("click", function () {
+    state.conn = null; try { localStorage.removeItem(LS); } catch (e) {}
+    qs("cfg").close(); reflectConn(); render();
+  });
+  qs("cfgSave").addEventListener("click", async function () {
+    var base = qs("apiBase").value.trim(), key = qs("apiKey").value.trim();
+    if (!base || !key) { qs("cfgErr").textContent = "주소와 키를 모두 입력하세요."; return; }
+    try {
+      var r = await fetch(base.replace(/\/$/, "") + "/v1/stats/summary?period=today",
+        { headers: { "X-API-Key": key } });
+      if (!r.ok) throw new Error("HTTP " + r.status + (r.status === 401 ? " · 키를 확인하세요" : ""));
+    } catch (e) {
+      qs("cfgErr").textContent = "연결 실패: " + e.message; return;
+    }
+    state.conn = { base: base, key: key };
+    try { localStorage.setItem(LS, JSON.stringify(state.conn)); } catch (e) {}
+    qs("cfg").close(); reflectConn(); render();
+  });
+
+  reflectConn();
+  render();
+})();
+</script>
+</body>
+</html>
