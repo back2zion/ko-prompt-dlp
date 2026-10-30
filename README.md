@@ -39,6 +39,14 @@ python -m pytest
 - SSO/인증 연동, 부하·고가용성 검증, 외부 보안 점검은 미실시
 - KMS 공급자는 가짜 클라이언트로만 검증했고 실제 AWS 계정으로는 미검증
 
+## dashboard/
+의존성 없는 단일 페이지 대시보드. 통계 API에 viewer 키로 연결하거나, 임베드된 합성 데모 데이터로 동작합니다.
+`axfilter/server/seed_demo.py`로 데모 데이터를 채우고, API에 `AXFILTER_CORS_ORIGINS`를 설정하면 실데이터로 연결됩니다.
+
+## extension/
+Chrome(MV3) 확장. ChatGPT·Claude·Gemini에서 전송 전 프롬프트를 가로채 검사 API로 보내고 허용·마스킹·차단합니다.
+`extension/test`의 `node unit.mjs`와 `node e2e.mjs`로 검증합니다. 자세한 내용은 `extension/README.md`.
+
 ## assetcheck/
 자사 자산 노출 점검 (`assetcheck.py`): 위험 포트 개방 여부, HTTP Basic 기본 비밀번호 허용 여부.
 스코프 파일(IP/CIDR, 최대 /24)과 `--confirm-authorized` 없이는 실행되지 않으며, 공인 IP는 `--allow-public`이 필요합니다.

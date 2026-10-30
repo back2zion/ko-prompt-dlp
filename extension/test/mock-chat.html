@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8"><title>Mock Chat</title></head>
+<body>
+  <div id="prompt-textarea" contenteditable="true" style="border:1px solid #ccc;min-height:40px;padding:8px"></div>
+  <button data-testid="send-button">Send</button>
+  <ul id="sent"></ul>
+  <script>
+    // Minimal stand-in for a chat app: Enter (no shift) or the button "sends" the
+    // editor text (records it and clears the editor).
+    var ed = document.getElementById("prompt-textarea");
+    var sent = document.getElementById("sent");
+    function send() {
+      var t = (ed.innerText || "").trim();
+      if (!t) return;
+      var li = document.createElement("li"); li.textContent = t; sent.appendChild(li);
+      ed.innerText = "";
+    }
+    document.querySelector("button[data-testid='send-button']").addEventListener("click", send);
+    ed.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+    });
+    window.__sentTexts = function () {
+      return Array.prototype.map.call(sent.children, function (li) { return li.textContent; });
+    };
+  </script>
+</body></html>

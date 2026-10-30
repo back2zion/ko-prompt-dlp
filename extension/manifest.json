@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "AX필터 — 생성형 AI 정보유출 방지",
+  "version": "0.1.0",
+  "description": "생성형 AI에 입력하는 프롬프트를 전송 전에 검사해 개인정보·자격증명을 마스킹하거나 차단합니다.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://chatgpt.com/*",
+    "https://chat.openai.com/*",
+    "https://claude.ai/*",
+    "https://gemini.google.com/*"
+  ],
+  "options_page": "options.html",
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://claude.ai/*",
+        "https://gemini.google.com/*"
+      ],
+      "js": ["filter-core.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
