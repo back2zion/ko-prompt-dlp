@@ -20,7 +20,7 @@ from .logging_setup import log_event, new_request_id, request_id, setup_logging
 from .policy import Policy, evaluate
 from .ratelimit import RateLimiter
 from .settings import Settings
-from .store import Store, load_or_create_key
+from .store import Store, load_or_create_key, retention_run
 
 PERIOD_DAYS = {"today": 1, "week": 7, "month": 30, "quarter": 90}
 Direction = Literal["all", "input", "output"]
@@ -48,6 +48,8 @@ class Config:
     rate_per_sec: float = 20.0                # token-bucket burst/rate per client; 0 = unlimited
     rate_per_day: int = 100_000               # per-client daily quota; 0 = unlimited
     rate_limiter: object | None = None        # injected RateLimiter (testing)
+    retention_original_days: int = 90         # purge recoverable originals after N days
+    retention_event_days: int = 0             # delete events after N days (0 = keep forever)
 
 
 def config_from_env(settings: Settings | None = None) -> Config:
@@ -72,7 +74,9 @@ def config_from_env(settings: Settings | None = None) -> Config:
                   oidc=verifier_from_settings(st),
                   gateway_upstream=st.gateway_upstream, gateway_upstream_key=st.gateway_upstream_key,
                   ner_recognizers=ner_recognizers,
-                  rate_per_sec=st.rate_per_sec, rate_per_day=st.rate_per_day)
+                  rate_per_sec=st.rate_per_sec, rate_per_day=st.rate_per_day,
+                  retention_original_days=st.retention_original_days,
+                  retention_event_days=st.retention_event_days)
 
 
 class InspectRequest(BaseModel):
@@ -295,6 +299,11 @@ def create_app(cfg: Config) -> FastAPI:
         n = store.rotate_data_key()
         store.audit(str(principal), "ROTATE_DATA_KEY", f"reencrypted:{n}")
         return {"reencrypted": n, "provider": store.key_provider_name}
+
+    @app.post("/v1/retention/run")
+    def retention(principal: Principal = Depends(require("admin"))):
+        return retention_run(store, original_days=cfg.retention_original_days,
+                             event_days=cfg.retention_event_days, actor=str(principal))
 
     @app.get("/v1/audit")
     def audit(_: str = Depends(require("admin"))):

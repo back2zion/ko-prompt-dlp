@@ -50,6 +50,19 @@ def _report(args) -> int:
     return 0
 
 
+def _purge(args) -> int:
+    import json as _json
+    from .app import config_from_env
+    from .keys import LocalMasterKeyProvider
+    from .store import Store, retention_run
+    cfg = config_from_env()
+    store = Store(cfg.db_path, cfg.key_provider or LocalMasterKeyProvider(cfg.data_key))
+    res = retention_run(store, original_days=cfg.retention_original_days,
+                        event_days=cfg.retention_event_days, actor="cli")
+    print(_json.dumps(res))
+    return 0
+
+
 def _show_config(args) -> int:
     st = Settings()
     red = st.model_dump()
@@ -87,6 +100,9 @@ def main(argv=None) -> int:
     r.add_argument("--framework", default=None, help="ISMS-P | 'ISO 27001' (default: all)")
     r.add_argument("--csv", action="store_true")
     r.set_defaults(fn=_report)
+
+    pu = sub.add_parser("purge", help="run data retention / purge from env config (no server)")
+    pu.set_defaults(fn=_purge)
 
     sc = sub.add_parser("show-config", help="print resolved settings (secrets redacted)")
     sc.set_defaults(fn=_show_config)

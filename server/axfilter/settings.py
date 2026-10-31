@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     trusted_proxy: bool = False
     cors_origins: str = ""            # comma-separated
 
+    # Data retention (days). Originals purged after ORIGINAL_DAYS; events deleted
+    # after EVENT_DAYS when > 0 (0 = keep events forever).
+    retention_original_days: int = 90
+    retention_event_days: int = 0
+
     max_auth_failures: int = 10
     auth_window_seconds: float = 300.0
     auth_lockout_seconds: float = 300.0

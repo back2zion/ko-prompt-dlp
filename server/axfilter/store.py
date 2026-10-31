@@ -240,6 +240,29 @@ class Store:
             rows = conn.execute(q).mappings().all()
         return [{**dict(r), "finding_types": json.loads(r["finding_types"])} for r in rows]
 
+    # ---- retention / purge --------------------------------------------
+    def count_events_older_than(self, ts: int) -> int:
+        """Number of events with ts < the given epoch-seconds cutoff."""
+        with self._engine.connect() as conn:
+            return conn.execute(select(func.count()).where(events.c.ts < ts)).scalar_one()
+
+    def purge_original_text(self, before_ts: int) -> int:
+        """Null out original_enc/nonce for events older than before_ts, keeping the
+        row and its metadata (stats/audit stay intact; only the recoverable original
+        is dropped). Returns the number of rows whose original was removed."""
+        with self._lock, self._engine.begin() as conn:
+            r = conn.execute(events.update()
+                             .where((events.c.ts < before_ts) & events.c.original_enc.is_not(None))
+                             .values(original_enc=None, nonce=None))
+            return r.rowcount
+
+    def purge_events(self, before_ts: int) -> int:
+        """Delete events older than before_ts entirely. Returns the count deleted.
+        The append-only audit log is never touched (integrity chain preserved)."""
+        with self._lock, self._engine.begin() as conn:
+            r = conn.execute(events.delete().where(events.c.ts < before_ts))
+            return r.rowcount
+
     # ---- stats --------------------------------------------------------
     def summary(self, since: int, direction: str) -> dict:
         with self._engine.connect() as conn:
@@ -312,3 +335,24 @@ class Store:
                     return {"ok": False, "broken_at": r["id"]}
                 prev = r["hash"]
         return {"ok": True, "broken_at": None}
+
+
+def retention_run(store: Store, *, original_days: int, event_days: int,
+                  actor: str = "system", now: int | None = None) -> dict:
+    """Apply retention to a Store: purge recoverable originals older than
+    original_days, and (when event_days > 0) delete events older than event_days.
+    Each purge writes an append-only audit record with its count. The audit log
+    itself is never purged. Returns {"purged_originals": n, "purged_events": m}."""
+    now = int(time.time()) if now is None else now
+    out = {"purged_originals": 0, "purged_events": 0}
+    if original_days and original_days > 0:
+        before = now - original_days * 86400
+        n = store.purge_original_text(before)
+        store.audit(actor, "PURGE_ORIGINAL", f"before_ts={before};count={n}")
+        out["purged_originals"] = n
+    if event_days and event_days > 0:
+        before = now - event_days * 86400
+        m = store.purge_events(before)
+        store.audit(actor, "PURGE_EVENTS", f"before_ts={before};count={m}")
+        out["purged_events"] = m
+    return out
