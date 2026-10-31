@@ -11,7 +11,7 @@
 FastAPI 기반 검사 API.
 
 ```
-cd axfilter/server
+cd server
 pip install -e ".[postgres,dev]"       # 패키지 설치 (콘솔 명령 axfilter 생성)
 AXFILTER_ADMIN_KEY=... AXFILTER_VIEWER_KEY=... AXFILTER_AGENT_KEY=... \
   axfilter serve --port 8000           # 키 생략 시 실행 때 임시 키 출력
@@ -47,7 +47,7 @@ python -m pytest                       # 97건 (SQLite) / 101건 (실 PostgreSQL
   - TLS 종단 프록시 뒤에서는 `AXFILTER_TRUSTED_PROXY=1`로 `X-Forwarded-Proto` 신뢰
 - **저장소**: SQLite(기본) 또는 **PostgreSQL** — `AXFILTER_DATABASE_URL`로 선택 (SQLAlchemy Core)
   - 마이그레이션: `alembic upgrade head` (SQLite·PostgreSQL 모두 검증)
-- **설정**: 모든 환경변수는 `AXFILTER_` 접두사 (`axfilter/server/.env.example` 참고), pydantic-settings로 중앙 관리
+- **설정**: 모든 환경변수는 `AXFILTER_` 접두사 (`server/.env.example` 참고), pydantic-settings로 중앙 관리
 - **로깅**: 구조화 JSON 로그 + 요청 ID. 프롬프트 원문·검출값은 로그에 남기지 않음(메타데이터만)
 
 ### 운영·관리 기능 (v0.2)
@@ -121,7 +121,7 @@ ISMS-P / ISO 27001 심사 대응용 증적 자료를 생성합니다(인증 보�
 
 ## dashboard/
 의존성 없는 단일 페이지 대시보드. 통계 API에 viewer 키로 연결하거나, 임베드된 합성 데모 데이터로 동작합니다.
-`axfilter/server/seed_demo.py`로 데모 데이터를 채우고, API에 `AXFILTER_CORS_ORIGINS`를 설정하면 실데이터로 연결됩니다.
+`server/seed_demo.py`로 데모 데이터를 채우고, API에 `AXFILTER_CORS_ORIGINS`를 설정하면 실데이터로 연결됩니다.
 
 ## extension/
 Chrome(MV3) 확장. ChatGPT·Claude·Gemini에서 전송 전 프롬프트를 가로채 검사 API로 보내고 허용·마스킹·차단합니다.

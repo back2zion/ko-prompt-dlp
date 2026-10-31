@@ -4,7 +4,7 @@ PostgreSQL + API + nginx(TLS 종단, 대시보드 서빙) 한 묶음.
 
 ## 실행
 ```
-cd axfilter/server && cp .env.example .env     # 키·비밀번호 채우기
+cd server && cp .env.example .env     # 키·비밀번호 채우기
 cd ../server && ./gen_dev_cert.sh ../deploy/certs   # 개발용 인증서 (운영은 CA 발급 인증서)
 cd ../deploy && POSTGRES_PASSWORD=... docker compose up --build
 ```

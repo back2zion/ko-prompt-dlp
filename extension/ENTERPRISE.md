@@ -12,7 +12,7 @@ Steps that require a **Google / organization account** are marked
 
 1. Open `chrome://extensions`.
 2. Enable **Developer mode** (top right).
-3. Click **Load unpacked** and select `axfilter/extension/`.
+3. Click **Load unpacked** and select `extension/`.
 4. Open the extension's **Options** and set the server URL and agent API key
    (unless these are supplied by a managed policy — see §4).
 
@@ -25,7 +25,7 @@ Chrome's `chrome://policy` page to confirm the values are applied.
 ## 2. Build the distributable zip
 
 ```
-cd axfilter/extension
+cd extension
 bash build.sh
 ```
 
