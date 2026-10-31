@@ -1,7 +1,11 @@
-# AX Filter prototype
+# AX Filter (v0.2.0)
 
-생성형 AI 프롬프트 개인정보 검출·마스킹·차단 프로토타입 (서버 핵심) + 자사 자산 점검 도구.
-데모/연구용이며 프로덕션 보안 제품이 아닙니다.
+생성형 AI 프롬프트의 **개인정보·자격증명 유출 방지** 솔루션. 프롬프트를 전송 전 검사해
+마스킹·차단하고, 정책·감사·컴플라이언스·멀티테넌시·강제 차단(게이트웨이)까지 갖춘 프로토타입.
+데모/연구용이며, 실제 판매 전에는 실환경 검증·보안 점검·인증이 필요합니다(아래 '한계' 참고).
+
+구성: `server/`(검사 API) · `dashboard/`(통계+관리자 콘솔) · `extension/`(크롬 MV3) ·
+`assetcheck/`(자산 점검) · `deploy/`(docker-compose·AWS) · `security/`(위협모델·점검).
 
 ## server/
 FastAPI 기반 검사 API.
@@ -12,14 +16,16 @@ pip install -e ".[postgres,dev]"       # 패키지 설치 (콘솔 명령 axfilte
 AXFILTER_ADMIN_KEY=... AXFILTER_VIEWER_KEY=... AXFILTER_AGENT_KEY=... \
   axfilter serve --port 8000           # 키 생략 시 실행 때 임시 키 출력
 axfilter show-config                   # 적용된 설정 확인(비밀값 마스킹)
-python -m pytest                       # 41건 (SQLite 38 + 실 PostgreSQL 3; PG는 URL 없으면 skip)
+python -m pytest                       # 97건 (SQLite) / 101건 (실 PostgreSQL 포함, URL 없으면 PG 4건 skip)
 ```
 
 | 역할 | 권한 |
 |---|---|
 | agent | `POST /v1/inspect` (프롬프트 검사) |
 | viewer | 통계·이력·정책 조회 (원문 불가) |
-| admin | 원문 열람(감사 로그 기록), 정책 변경, 감사 로그 검증·검색, 정책 변경 이력, **컴플라이언스 증적 리포트** |
+| admin | 원문 열람(감사됨), 정책 변경, 감사 검증·검색, 정책 이력, 컴플라이언스 리포트, **API키 발급/회수**, **보존·파기 실행** |
+
+인증: 역할별 정적 API 키(`X-API-Key`) 또는 **OIDC 베어러(SSO)** 또는 **DB 발급 명명 키**(`axfilter apikey`). 멀티테넌시는 `X-Tenant` 헤더.
 
 - 검출: 주민등록번호(날짜·체크섬), 카드번호(Luhn), 사업자번호(체크섬), 여권번호, 전화번호, 이메일,
   자격증명/비밀키(AWS·GitHub·Slack 토큰, 개인키 블록, JWT, `password=`류 대입), **한국어 이름·주소(문맥·사전 기반)**, 사내 키워드
@@ -43,6 +49,14 @@ python -m pytest                       # 41건 (SQLite 38 + 실 PostgreSQL 3; PG
   - 마이그레이션: `alembic upgrade head` (SQLite·PostgreSQL 모두 검증)
 - **설정**: 모든 환경변수는 `AXFILTER_` 접두사 (`axfilter/server/.env.example` 참고), pydantic-settings로 중앙 관리
 - **로깅**: 구조화 JSON 로그 + 요청 ID. 프롬프트 원문·검출값은 로그에 남기지 않음(메타데이터만)
+
+### 운영·관리 기능 (v0.2)
+- **레이트리밋·쿼터**: 클라이언트별 토큰버킷 + 일일 쿼터, 초과 시 429 + `Retry-After` (`AXFILTER_RATE_PER_SEC/DAY`, 0=무제한)
+- **멀티테넌시**: `X-Tenant` 헤더로 이벤트·정책·통계·정책이력을 테넌트별 격리. 기본 테넌트는 기존과 동일, 기존 DB는 런타임 ALTER로 자동 이행
+- **데이터 보존·파기**: `POST /v1/retention/run`(admin) 및 `axfilter purge` — 원문은 N일 후 파기, 이벤트는 선택적 파기. 감사로그는 추가전용으로 보존 (`AXFILTER_RETENTION_ORIGINAL_DAYS/EVENT_DAYS`)
+- **명명 API 키 관리**: `POST/GET/DELETE /v1/keys`(admin), `axfilter apikey issue|revoke|list` — 토큰은 해시만 저장하고 발급 시 1회만 노출, 발급/회수 감사
+- **관리자 콘솔**: `dashboard/admin.html` — 정책 편집·이력·감사 검색·원문 열람(경고·감사)·컴플라이언스 리포트
+- **대시보드 드릴다운**: 검출 유형별 순위, 최근 이벤트 테이블(필터·페이지네이션), 서비스/그룹/IP 행 클릭 필터
 
 ### 강제 차단 (이그레스 게이트웨이 / 네트워크 프록시)
 확장은 사용자가 끌 수 있어 우회 가능합니다. 서버·앱 트래픽까지 강제하려면:

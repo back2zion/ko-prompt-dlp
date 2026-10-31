@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "axfilter"
-version = "0.1.0"
-description = "Prompt PII/credential leak prevention for generative AI (detection, masking, policy, encrypted audit)."
+version = "0.2.0"
+description = "Prompt PII/credential leak prevention for generative AI: detection, masking, policy, egress gateway, multi-tenant, encrypted audit, compliance evidence."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
