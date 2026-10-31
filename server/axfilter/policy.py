@@ -75,7 +75,7 @@ def _within(rule: TimeRule, now: datetime) -> bool:
 
 
 def evaluate(policy: Policy, *, service: str, ip: str, text: str,
-             now: datetime | None = None) -> Decision:
+             now: datetime | None = None, extra=None) -> Decision:
     now = (now or datetime.now(TZ)).astimezone(TZ)
     group = resolve_group(policy, ip)
     svc = service.strip().lower()
@@ -87,7 +87,8 @@ def evaluate(policy: Policy, *, service: str, ip: str, text: str,
         if rule.group == group and not _within(rule, now):
             return Decision("block", "TIME_RESTRICTED", group)
 
-    findings = detect(text, policy.keywords, names=policy.detect_names, addresses=policy.detect_addresses)
+    findings = detect(text, policy.keywords, names=policy.detect_names,
+                      addresses=policy.detect_addresses, extra=extra)
     actions = {f.type: policy.type_actions.get(f.type, "mask") for f in findings}
     if "block" in actions.values():
         return Decision("block", "PII_BLOCKED", group, findings)

@@ -43,6 +43,7 @@ class Config:
     gateway_upstream: str = ""                # LLM provider base URL; enables the egress gateway
     gateway_upstream_key: str = ""            # provider API key injected by the gateway
     http_client: object | None = None         # injected httpx.Client (testing)
+    ner_recognizers: list | None = None       # extra recognizer callables (e.g. transformer NER)
 
 
 def config_from_env(settings: Settings | None = None) -> Config:
@@ -52,6 +53,10 @@ def config_from_env(settings: Settings | None = None) -> Config:
     # Local master key lives in the data dir (or AXFILTER_DATA_KEY); KMS needs no local key.
     local_key = load_or_create_key(st.data_dir / "data.key")
     db = st.database_url or str(st.data_dir / "axfilter.db")
+    ner_recognizers = None
+    if st.ner_model:
+        from .ner_models import TransformerNerRecognizer
+        ner_recognizers = [TransformerNerRecognizer(st.ner_model, threshold=st.ner_threshold)]
     return Config(db, local_key, st.resolved_keys(),
                   key_provider=provider_from_env(local_key),
                   require_tls=st.require_tls, trusted_proxy=st.trusted_proxy,
@@ -61,7 +66,8 @@ def config_from_env(settings: Settings | None = None) -> Config:
                   auth_lockout_seconds=st.auth_lockout_seconds,
                   siem=SiemForwarder(sink=st.siem_sink, fmt=st.siem_format, target=st.siem_target),
                   oidc=verifier_from_settings(st),
-                  gateway_upstream=st.gateway_upstream, gateway_upstream_key=st.gateway_upstream_key)
+                  gateway_upstream=st.gateway_upstream, gateway_upstream_key=st.gateway_upstream_key,
+                  ner_recognizers=ner_recognizers)
 
 
 class InspectRequest(BaseModel):
@@ -82,6 +88,7 @@ def create_app(cfg: Config) -> FastAPI:
     store = Store(cfg.db_path, provider)
     siem = cfg.siem or SiemForwarder()
     verifier = cfg.oidc
+    ner_recognizers = cfg.ner_recognizers or None
 
     def _is_https(request: Request) -> bool:
         if request.url.scheme == "https":
@@ -159,7 +166,7 @@ def create_app(cfg: Config) -> FastAPI:
     def inspect(req: InspectRequest, _: str = Depends(require("agent"))):
         t0 = time.perf_counter()
         policy = store.get_policy()
-        d = evaluate(policy, service=req.service, ip=req.ip, text=req.text)
+        d = evaluate(policy, service=req.service, ip=req.ip, text=req.text, extra=ner_recognizers)
         types = sorted({f.type for f in d.findings})
         latency = (time.perf_counter() - t0) * 1000
         event_id = store.add_event(

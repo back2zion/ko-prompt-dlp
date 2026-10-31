@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     gateway_upstream: str = ""        # provider base URL, e.g. https://api.openai.com
     gateway_upstream_key: str = ""
 
+    # Optional transformer NER model (augments rule-based name/address detection)
+    ner_model: str = ""               # HF model name; empty disables the model adapter
+    ner_threshold: float = 0.5        # minimum entity score to accept a span
+
     def resolved_keys(self) -> dict[str, str]:
         out = {}
         for role in ("agent", "viewer", "admin"):
