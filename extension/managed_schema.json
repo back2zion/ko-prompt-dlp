@@ -1,0 +1,28 @@
+{
+  "type": "object",
+  "title": "AX Filter managed configuration",
+  "description": "Enterprise policy for the AX Filter extension. Values set here are read-only, take precedence over per-user settings, and let an administrator preconfigure the inspection server and fail mode via Chrome enterprise policy.",
+  "properties": {
+    "apiBase": {
+      "type": "string",
+      "title": "Server URL",
+      "description": "Base URL of the AX Filter inspection server, e.g. https://axfilter.example.com (no trailing slash). The extension calls <apiBase>/v1/inspect."
+    },
+    "apiKey": {
+      "type": "string",
+      "title": "Agent API key",
+      "description": "Value sent as the X-API-Key header (agent role). Optional; set only if the organization distributes a shared agent key via policy."
+    },
+    "enabled": {
+      "type": "boolean",
+      "title": "Inspection enabled",
+      "description": "When true, prompts are inspected before sending. When false, the extension does not intercept."
+    },
+    "failMode": {
+      "type": "string",
+      "title": "Behavior when the server is unreachable",
+      "description": "block = hold the prompt (fail safe); allow = send anyway.",
+      "enum": ["block", "allow"]
+    }
+  }
+}

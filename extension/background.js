@@ -2,8 +2,25 @@
    cross-origin fetch from the page context. Config comes from chrome.storage. */
 "use strict";
 
+async function getManaged(keys) {
+  // Enterprise policy (chrome.storage.managed) overrides per-user settings.
+  // Absent or unsupported: return {} so behavior falls back to storage.sync.
+  try {
+    if (chrome.storage && chrome.storage.managed) {
+      const m = await chrome.storage.managed.get(keys);
+      const out = {};
+      for (const k of keys) if (m && m[k] !== undefined && m[k] !== null) out[k] = m[k];
+      return out;
+    }
+  } catch (e) { /* managed storage unavailable */ }
+  return {};
+}
+
 async function getConfig() {
-  const d = await chrome.storage.sync.get(["apiBase", "apiKey", "enabled", "failMode"]);
+  const keys = ["apiBase", "apiKey", "enabled", "failMode"];
+  const sync = await chrome.storage.sync.get(keys);
+  const managed = await getManaged(keys);
+  const d = Object.assign({}, sync, managed);  // policy wins when set
   return {
     apiBase: (d.apiBase || "").replace(/\/$/, ""),
     apiKey: d.apiKey || "",
