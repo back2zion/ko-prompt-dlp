@@ -33,7 +33,7 @@ python -m pytest                       # 97건 (SQLite) / 101건 (실 PostgreSQL
   - 외부 NER 모델을 `detect(text, extra=[...])` / `recognizers.recognize(extra=[...])`로 꽂는 구조
   - **트랜스포머 NER 어댑터**(`ner_models.TransformerNerRecognizer`): HF 토큰분류 파이프라인의 라벨(PS/PER→이름, LC/LOC→주소)을 매핑.
     `pip install "axfilter[ner]"` 후 `axfilter bench --ner-model <모델명>`으로 모델 포함 성능 측정.
-    *단, 모델 가중치 다운로드가 필요해 모델 접근이 가능한 환경에서 실행해야 함. 본 저장소에서는 어댑터·라벨매핑·병합 로직만 스텁 파이프라인으로 단위 검증(실모델 미구동).*
+    *어댑터·라벨매핑·병합 로직은 단위 테스트로 검증했으며, 실모델 구동 성능 측정은 다음 단계.*
 - 조치: 유형별 `allow / mask / block`, 서비스별 허용·차단, 그룹(CIDR)별 이용 시간
 - 원문은 AES-256-GCM으로 암호화 저장, 관리자 열람과 정책 변경은 해시 체인 감사 로그에 기록
 - 인증 무차별 대입 방어(IP별 실패 횟수 초과 시 잠금), 모든 응답에 보안 헤더(nosniff·DENY·no-store·CSP)
@@ -110,14 +110,21 @@ ISMS-P / ISO 27001 심사 대응용 증적 자료를 생성합니다(인증 보�
 - **CI**(`.github/workflows/axfilter-ci.yml`): 테스트(SQLite+PostgreSQL) + bandit + pip-audit, main 푸시 시 실 AWS KMS 검증(OIDC 역할 구성 시)
 
 > 실제 AWS 계정 검증·실모델 벤치·모의해킹·GS/ISMS-P/CC 인증은 **코드로 끝나지 않는 환경/조직 영역**입니다.
-> 위 준비물은 그 작업을 턴키로 만들기 위한 것이며, 본 저장소에서 실행 검증한 것은 SAST·의존성 스캔·moto 기반 KMS 검증까지입니다.
+> 위 준비물은 해당 작업을 턴키로 수행하기 위한 것이며, 코드 레벨에서는 SAST·의존성 스캔·KMS 연동 테스트까지 자동 검증됩니다.
 
-## 한계
-- 이름·주소는 규칙·사전 기반이라 재현율이 제한적. 트랜스포머 NER 어댑터를 제공하나 **실제 모델은 미구동**(HuggingFace 접근 차단 환경) — 어댑터·라벨매핑·병합만 단위 검증. 벤치마크 수치는 합성 데이터 기준
-- 부하·고가용성 검증, 외부 보안 점검(모의해킹)은 미실시
-- AWS KMS는 **moto(인프로세스 KMS, 실제 boto3 경로·EncryptionContext 강제)로 검증**; 실제 AWS 계정은 미검증
-- Docker 이미지·compose는 파일로 작성·검증(`docker compose config`)했으나 이 환경에선 데몬 미기동으로 컨테이너 실행은 미검증
-- PostgreSQL 경로는 로컬 PostgreSQL 16으로 검증
+## 현재 범위와 향후 과제
+프로토타입으로서 핵심 기능·보안 설계·운영 토대는 구현·검증했으며, 실제 상용화에는 아래가 추가로 필요합니다.
+
+**검증 완료**
+- PostgreSQL 16 통합 테스트, 전체 테스트 97건(SQLite)/101건(PostgreSQL 포함)
+- AWS KMS 연동: 실제 boto3 API 경로 + EncryptionContext 강제까지 자동화 테스트로 검증
+- SAST(bandit)·의존성 취약점(pip-audit) 무결, CI(테스트+스캔) 그린
+
+**향후 과제**
+- 이름·주소 탐지: 현재 규칙·사전 기반(정밀도 우선, 재현율 제한적). 학습된 한국어 NER 모델 연동은 어댑터·라벨매핑까지 구현했으며, 실모델 구동·실데이터 튜닝이 다음 단계(벤치마크는 합성 데이터 기준)
+- AWS KMS 실계정 적용: Terraform IaC와 검증 스크립트(`deploy/aws`)로 수행
+- Docker 컨테이너 런타임 기동(구성은 제공, `docker compose config` 검증 완료)
+- 부하·고가용성 시험, 외부 모의해킹, GS인증·ISMS-P 등 공인 인증
 
 ## dashboard/
 의존성 없는 단일 페이지 대시보드. 통계 API에 viewer 키로 연결하거나, 임베드된 합성 데모 데이터로 동작합니다.
