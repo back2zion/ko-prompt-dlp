@@ -16,18 +16,21 @@ from pathlib import Path
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from sqlalchemy import (BigInteger, Column, Float, Index, Integer, LargeBinary,
                         MetaData, String, Table, Text, case, create_engine,
-                        distinct, func, select)
+                        distinct, func, inspect as sa_inspect, select, text)
 
 from .keys import KeyProvider
 from .policy import Policy
 
 GENESIS = "0" * 64
+DEFAULT_TENANT = "default"
 metadata = MetaData()
 
 events = Table(
     "events", metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column("ts", BigInteger, nullable=False),
+    # Optional multi-tenancy: single-tenant deployments stay on "default".
+    Column("tenant", Text, nullable=False, server_default=DEFAULT_TENANT),
     Column("service", Text, nullable=False),
     Column("user", Text, nullable=False),      # SQLAlchemy quotes this reserved word per dialect
     Column("ip", Text, nullable=False),
@@ -43,6 +46,7 @@ events = Table(
     Column("original_enc", LargeBinary),
 )
 Index("idx_events_ts", events.c.ts)
+Index("idx_events_tenant", events.c.tenant)
 
 kv = Table("kv", metadata,
            Column("k", String(64), primary_key=True),
@@ -52,6 +56,7 @@ policy_history = Table(
     "policy_history", metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column("ts", BigInteger, nullable=False),
+    Column("tenant", Text, nullable=False, server_default=DEFAULT_TENANT),
     Column("actor", Text, nullable=False),
     Column("policy_json", Text, nullable=False),
     Column("hash", Text, nullable=False),
@@ -108,7 +113,26 @@ class Store:
         self._engine = create_engine(url, **kwargs)
         self._dialect = self._engine.dialect.name
         metadata.create_all(self._engine)
+        self._migrate()
         self._aes = AESGCM(self._load_or_create_dek())
+
+    def _migrate(self) -> None:
+        """Additively bring pre-existing databases up to date.
+
+        ``create_all`` never alters an existing table, so a database created
+        before multi-tenancy keeps its old ``events``/``policy_history`` shape.
+        Add the nullable-with-default ``tenant`` column when it is missing so
+        old rows read back as the default tenant. The DDL (``ADD COLUMN ... NOT
+        NULL DEFAULT``) is accepted by both SQLite and PostgreSQL.
+        """
+        with self._lock, self._engine.begin() as conn:
+            insp = sa_inspect(conn)
+            for table in ("events", "policy_history"):
+                cols = {c["name"] for c in insp.get_columns(table)}
+                if "tenant" not in cols:
+                    conn.execute(text(
+                        f"ALTER TABLE {table} ADD COLUMN tenant TEXT "
+                        f"NOT NULL DEFAULT '{DEFAULT_TENANT}'"))
 
     # ---- small helpers ------------------------------------------------
     def _kv_set(self, conn, k: str, v: str) -> None:
@@ -130,10 +154,12 @@ class Store:
             func.sum(case((events.c.action == "mask", 1), else_=0)).label("masked"),
         ]
 
-    def _where(self, since: int, direction: str):
+    def _where(self, since: int, direction: str, tenant: str | None = None):
         cond = events.c.ts >= since
         if direction != "all":
             cond = cond & (events.c.direction == direction)
+        if tenant is not None:
+            cond = cond & (events.c.tenant == tenant)
         return cond
 
     def _day_expr(self):
@@ -179,62 +205,87 @@ class Store:
     def key_provider_name(self) -> str:
         return self._provider.name
 
-    # ---- policy -------------------------------------------------------
-    def get_policy(self) -> Policy:
+    # ---- policy (per-tenant; single-tenant deployments use "default") -
+    @staticmethod
+    def _policy_key(tenant: str) -> str:
+        return f"policy:{tenant}"
+
+    def get_policy(self, tenant: str = DEFAULT_TENANT) -> Policy:
         with self._engine.connect() as conn:
-            v = self._kv_get(conn, "policy")
+            v = self._kv_get(conn, self._policy_key(tenant))
+            if v is None and tenant == DEFAULT_TENANT:
+                # Backward compatibility: pre-tenancy databases stored the
+                # single policy under the bare "policy" key.
+                v = self._kv_get(conn, "policy")
         return Policy.model_validate_json(v) if v else Policy()
 
-    def set_policy(self, policy: Policy, actor: str = "system") -> None:
+    def set_policy(self, policy: Policy, actor: str = "system",
+                   tenant: str = DEFAULT_TENANT) -> None:
         pj = policy.model_dump_json()
         digest = hashlib.sha256(pj.encode()).hexdigest()
         with self._lock, self._engine.begin() as conn:
-            self._kv_set(conn, "policy", pj)
+            self._kv_set(conn, self._policy_key(tenant), pj)
             conn.execute(policy_history.insert().values(
-                ts=int(time.time()), actor=actor, policy_json=pj, hash=digest))
+                ts=int(time.time()), tenant=tenant, actor=actor,
+                policy_json=pj, hash=digest))
 
-    def policy_history(self, limit: int = 100) -> list[dict]:
+    def policy_history(self, limit: int = 100,
+                       tenant: str | None = None) -> list[dict]:
+        q = select(policy_history.c.id, policy_history.c.ts, policy_history.c.tenant,
+                   policy_history.c.actor, policy_history.c.hash)
+        if tenant is not None:
+            q = q.where(policy_history.c.tenant == tenant)
+        q = q.order_by(policy_history.c.id.desc()).limit(limit)
         with self._engine.connect() as conn:
-            rows = conn.execute(select(
-                policy_history.c.id, policy_history.c.ts, policy_history.c.actor,
-                policy_history.c.hash).order_by(policy_history.c.id.desc()).limit(limit)).mappings().all()
+            rows = conn.execute(q).mappings().all()
         return [dict(r) for r in rows]
 
-    def policy_version(self, version_id: int) -> dict | None:
+    def policy_version(self, version_id: int,
+                       tenant: str | None = None) -> dict | None:
+        q = select(policy_history).where(policy_history.c.id == version_id)
+        if tenant is not None:
+            q = q.where(policy_history.c.tenant == tenant)
         with self._engine.connect() as conn:
-            r = conn.execute(select(policy_history).where(
-                policy_history.c.id == version_id)).mappings().first()
+            r = conn.execute(q).mappings().first()
         return dict(r) if r else None
 
     # ---- events -------------------------------------------------------
     def add_event(self, *, service, user, ip, group, direction, action, reason,
-                  finding_types, latency_ms, masked_text, original, ts=None) -> int:
+                  finding_types, latency_ms, masked_text, original, ts=None,
+                  tenant: str = DEFAULT_TENANT) -> int:
         nonce = os.urandom(12)
         enc = self._aes.encrypt(nonce, original.encode(), None) if finding_types else None
         with self._lock, self._engine.begin() as conn:
             r = conn.execute(events.insert().values(
-                ts=ts or int(time.time()), service=service, user=user, ip=ip, grp=group,
+                ts=ts or int(time.time()), tenant=tenant, service=service, user=user,
+                ip=ip, grp=group,
                 direction=direction, action=action, reason=reason,
                 finding_types=json.dumps(finding_types), finding_count=len(finding_types),
                 latency_ms=latency_ms, masked_text=masked_text,
                 nonce=nonce if enc else None, original_enc=enc))
             return r.inserted_primary_key[0]
 
-    def get_event(self, event_id: int):
+    def get_event(self, event_id: int, tenant: str | None = None):
+        q = select(events).where(events.c.id == event_id)
+        if tenant is not None:
+            q = q.where(events.c.tenant == tenant)
         with self._engine.connect() as conn:
-            return conn.execute(select(events).where(events.c.id == event_id)).mappings().first()
+            return conn.execute(q).mappings().first()
 
     def decrypt_original(self, row) -> str | None:
         if row is None or row["original_enc"] is None:
             return None
         return self._aes.decrypt(row["nonce"], row["original_enc"], None).decode()
 
-    def list_events(self, limit: int, offset: int, action: str | None) -> list[dict]:
+    def list_events(self, limit: int, offset: int, action: str | None,
+                    tenant: str | None = None) -> list[dict]:
         q = select(events.c.id, events.c.ts, events.c.service, events.c.user, events.c.ip,
                    events.c.grp, events.c.direction, events.c.action, events.c.reason,
                    events.c.finding_types, events.c.masked_text)
         if action:
             q = q.where(events.c.action == action)
+        if tenant is not None:
+            q = q.where(events.c.tenant == tenant)
         q = q.order_by(events.c.id.desc()).limit(limit).offset(offset)
         with self._engine.connect() as conn:
             rows = conn.execute(q).mappings().all()
@@ -264,27 +315,29 @@ class Store:
             return r.rowcount
 
     # ---- stats --------------------------------------------------------
-    def summary(self, since: int, direction: str) -> dict:
+    def summary(self, since: int, direction: str, tenant: str | None = None) -> dict:
         with self._engine.connect() as conn:
-            r = conn.execute(select(*self._agg()).where(self._where(since, direction))).mappings().first()
+            r = conn.execute(select(*self._agg()).where(
+                self._where(since, direction, tenant))).mappings().first()
         return _clean(r)
 
-    def daily(self, since: int, direction: str) -> list[dict]:
+    def daily(self, since: int, direction: str, tenant: str | None = None) -> list[dict]:
         day = self._day_expr().label("day")
-        q = (select(day, *self._agg()).where(self._where(since, direction))
+        q = (select(day, *self._agg()).where(self._where(since, direction, tenant))
              .group_by(day).order_by(day))
         with self._engine.connect() as conn:
             return [_clean(r) for r in conn.execute(q).mappings().all()]
 
-    def by_service(self, since: int, direction: str) -> list[dict]:
+    def by_service(self, since: int, direction: str, tenant: str | None = None) -> list[dict]:
         total = func.count().label("total")
         q = (select(events.c.service, *self._agg(),
                     func.avg(events.c.latency_ms).label("avg_latency_ms"))
-             .where(self._where(since, direction)).group_by(events.c.service).order_by(total.desc()))
+             .where(self._where(since, direction, tenant)).group_by(events.c.service).order_by(total.desc()))
         with self._engine.connect() as conn:
             return [_clean(r) for r in conn.execute(q).mappings().all()]
 
-    def top(self, since: int, direction: str, by: str, n: int) -> list[dict]:
+    def top(self, since: int, direction: str, by: str, n: int,
+            tenant: str | None = None) -> list[dict]:
         total = func.count().label("total")
         if by == "group":
             cols = [events.c.grp.label("grp"), func.count(distinct(events.c.user)).label("users")]
@@ -292,7 +345,7 @@ class Store:
         else:
             cols = [events.c.ip, func.max(events.c.user).label("user"), func.max(events.c.grp).label("grp")]
             group_col = events.c.ip
-        q = (select(*cols, *self._agg()).where(self._where(since, direction))
+        q = (select(*cols, *self._agg()).where(self._where(since, direction, tenant))
              .group_by(group_col).order_by(total.desc()).limit(n))
         with self._engine.connect() as conn:
             return [_clean(r) for r in conn.execute(q).mappings().all()]

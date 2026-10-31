@@ -26,6 +26,21 @@ PERIOD_DAYS = {"today": 1, "week": 7, "month": 30, "quarter": 90}
 Direction = Literal["all", "input", "output"]
 ROLE_RANK = {"agent": 0, "viewer": 1, "admin": 2}
 
+DEFAULT_TENANT = "default"
+_TENANT_RE = __import__("re").compile(r"^[A-Za-z0-9._-]{1,50}$")
+
+
+def resolve_tenant(x_tenant: str = Header(default=DEFAULT_TENANT)) -> str:
+    """Tenant id from the ``X-Tenant`` header (default ``"default"``).
+
+    Single-tenant clients omit the header and stay on the default tenant,
+    behaving exactly as before multi-tenancy existed.
+    """
+    t = (x_tenant or DEFAULT_TENANT).strip() or DEFAULT_TENANT
+    if not _TENANT_RE.match(t):
+        raise HTTPException(422, "invalid X-Tenant header")
+    return t
+
 
 @dataclass
 class Config:
@@ -219,16 +234,17 @@ def create_app(cfg: Config) -> FastAPI:
         return dep
 
     @app.post("/v1/inspect")
-    def inspect(req: InspectRequest, _: str = Depends(require("agent"))):
+    def inspect(req: InspectRequest, _: str = Depends(require("agent")),
+                tenant: str = Depends(resolve_tenant)):
         t0 = time.perf_counter()
-        policy = store.get_policy()
+        policy = store.get_policy(tenant=tenant)
         d = evaluate(policy, service=req.service, ip=req.ip, text=req.text, extra=ner_recognizers)
         types = sorted({f.type for f in d.findings})
         latency = (time.perf_counter() - t0) * 1000
         event_id = store.add_event(
             service=req.service.strip().lower(), user=req.user, ip=req.ip, group=d.group,
             direction=req.direction, action=d.action, reason=d.reason, finding_types=types,
-            latency_ms=latency, masked_text=d.forward_text, original=req.text)
+            latency_ms=latency, masked_text=d.forward_text, original=req.text, tenant=tenant)
         if d.action != "allow" or types:
             siem.emit("prompt." + d.action, action=d.action, name=f"prompt {d.action}",
                       service=req.service, user=req.user, src=req.ip, group=d.group,
@@ -249,10 +265,10 @@ def create_app(cfg: Config) -> FastAPI:
 
     @app.get("/v1/stats/summary")
     def summary(period: str = "week", direction: Direction = "all",
-                _: str = Depends(require("viewer"))):
-        cur = store.summary(since(period), direction)
+                _: str = Depends(require("viewer")), tenant: str = Depends(resolve_tenant)):
+        cur = store.summary(since(period), direction, tenant)
         prev_since = since(period) - PERIOD_DAYS[period] * 86400
-        prev_total = store.summary(prev_since, direction)["total"] - cur["total"]
+        prev_total = store.summary(prev_since, direction, tenant)["total"] - cur["total"]
         change = None if prev_total <= 0 else round((cur["total"] / prev_total - 1) * 100, 1)
         t = cur["total"] or 1
         return {**cur, "detect_rate": round(cur["detected"] / t * 100, 1),
@@ -263,30 +279,31 @@ def create_app(cfg: Config) -> FastAPI:
 
     @app.get("/v1/stats/daily")
     def daily(period: str = "week", direction: Direction = "all",
-              _: str = Depends(require("viewer"))):
-        return store.daily(since(period), direction)
+              _: str = Depends(require("viewer")), tenant: str = Depends(resolve_tenant)):
+        return store.daily(since(period), direction, tenant)
 
     @app.get("/v1/stats/services")
     def services(period: str = "week", direction: Direction = "all",
-                 _: str = Depends(require("viewer"))):
-        return store.by_service(since(period), direction)
+                 _: str = Depends(require("viewer")), tenant: str = Depends(resolve_tenant)):
+        return store.by_service(since(period), direction, tenant)
 
     @app.get("/v1/stats/top")
     def top(by: Literal["group", "ip"] = "group", period: str = "week",
             direction: Direction = "all", n: int = Query(5, ge=1, le=50),
-            _: str = Depends(require("viewer"))):
-        return store.top(since(period), direction, by, n)
+            _: str = Depends(require("viewer")), tenant: str = Depends(resolve_tenant)):
+        return store.top(since(period), direction, by, n, tenant)
 
     @app.get("/v1/events")
     def events(limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
                action: Literal["allow", "mask", "block"] | None = None,
-               _: str = Depends(require("viewer"))):
-        return store.list_events(limit, offset, action)
+               _: str = Depends(require("viewer")), tenant: str = Depends(resolve_tenant)):
+        return store.list_events(limit, offset, action, tenant)
 
     # ---- admin ----------------------------------------------------------
     @app.get("/v1/events/{event_id}/original")
-    def original(event_id: int, principal: Principal = Depends(require("admin"))):
-        row = store.get_event(event_id)
+    def original(event_id: int, principal: Principal = Depends(require("admin")),
+                 tenant: str = Depends(resolve_tenant)):
+        row = store.get_event(event_id, tenant=tenant)
         if row is None:
             raise HTTPException(404, "event not found")
         store.audit(str(principal), "VIEW_ORIGINAL", f"event:{event_id}")
@@ -295,13 +312,14 @@ def create_app(cfg: Config) -> FastAPI:
         return {"event_id": event_id, "original": store.decrypt_original(row)}
 
     @app.get("/v1/policy")
-    def get_policy(_: str = Depends(require("viewer"))):
-        return store.get_policy()
+    def get_policy(_: str = Depends(require("viewer")), tenant: str = Depends(resolve_tenant)):
+        return store.get_policy(tenant=tenant)
 
     @app.put("/v1/policy")
-    def put_policy(policy: Policy, principal: Principal = Depends(require("admin"))):
-        store.set_policy(policy, actor=str(principal))
-        store.audit(str(principal), "UPDATE_POLICY", "policy")
+    def put_policy(policy: Policy, principal: Principal = Depends(require("admin")),
+                   tenant: str = Depends(resolve_tenant)):
+        store.set_policy(policy, actor=str(principal), tenant=tenant)
+        store.audit(str(principal), "UPDATE_POLICY", f"policy:{tenant}")
         siem.emit("audit.update_policy", name="policy updated", actor=str(principal), rid=request_id.get())
         return policy
 
@@ -355,12 +373,14 @@ def create_app(cfg: Config) -> FastAPI:
         return store.audit_search(**kw)
 
     @app.get("/v1/policy/history")
-    def policy_history(limit: int = Query(100, ge=1, le=1000), _: str = Depends(require("admin"))):
-        return store.policy_history(limit)
+    def policy_history(limit: int = Query(100, ge=1, le=1000),
+                       _: str = Depends(require("admin")), tenant: str = Depends(resolve_tenant)):
+        return store.policy_history(limit, tenant=tenant)
 
     @app.get("/v1/policy/history/{version_id}")
-    def policy_version(version_id: int, _: str = Depends(require("admin"))):
-        v = store.policy_version(version_id)
+    def policy_version(version_id: int, _: str = Depends(require("admin")),
+                       tenant: str = Depends(resolve_tenant)):
+        v = store.policy_version(version_id, tenant=tenant)
         if v is None:
             raise HTTPException(404, "version not found")
         return v
