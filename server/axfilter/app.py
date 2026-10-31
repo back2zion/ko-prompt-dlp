@@ -14,6 +14,8 @@ import logging
 
 from .keys import KeyProvider, LocalMasterKeyProvider, provider_from_env
 from . import compliance
+from .oidc import Principal, ROLE_RANK as OIDC_RANK, verifier_from_settings
+from .siem import SiemForwarder
 from .logging_setup import log_event, new_request_id, request_id, setup_logging
 from .policy import Policy, evaluate
 from .settings import Settings
@@ -36,6 +38,8 @@ class Config:
     require_tls: bool = False                 # reject plain-HTTP requests
     trusted_proxy: bool = False               # honour X-Forwarded-Proto from a TLS-terminating proxy
     cors_origins: tuple[str, ...] = ()        # dashboard origins allowed to call the API
+    siem: SiemForwarder | None = None
+    oidc: object | None = None                # oidc.Verifier or None
 
 
 def config_from_env(settings: Settings | None = None) -> Config:
@@ -51,7 +55,9 @@ def config_from_env(settings: Settings | None = None) -> Config:
                   cors_origins=st.cors_list(),
                   max_auth_failures=st.max_auth_failures,
                   auth_window_seconds=st.auth_window_seconds,
-                  auth_lockout_seconds=st.auth_lockout_seconds)
+                  auth_lockout_seconds=st.auth_lockout_seconds,
+                  siem=SiemForwarder(sink=st.siem_sink, fmt=st.siem_format, target=st.siem_target),
+                  oidc=verifier_from_settings(st))
 
 
 class InspectRequest(BaseModel):
@@ -70,6 +76,8 @@ def create_app(cfg: Config) -> FastAPI:
                            allow_methods=["GET", "POST", "PUT"], allow_headers=["X-API-Key", "Content-Type"])
     provider = cfg.key_provider or LocalMasterKeyProvider(cfg.data_key)
     store = Store(cfg.db_path, provider)
+    siem = cfg.siem or SiemForwarder()
+    verifier = cfg.oidc
 
     def _is_https(request: Request) -> bool:
         if request.url.scheme == "https":
@@ -116,7 +124,17 @@ def create_app(cfg: Config) -> FastAPI:
             dq.clear()
 
     def require(min_role: str):
-        def dep(request: Request, x_api_key: str = Header(default="")) -> str:
+        def dep(request: Request, x_api_key: str = Header(default=""),
+                authorization: str = Header(default="")) -> Principal:
+            # OIDC bearer (SSO) takes precedence when a token is presented.
+            if verifier and authorization.lower().startswith("bearer "):
+                try:
+                    pr = verifier.verify(authorization[7:].strip())
+                except Exception:
+                    raise HTTPException(401, "invalid bearer token")
+                if OIDC_RANK[pr.role] >= ROLE_RANK[min_role]:
+                    return pr
+                raise HTTPException(403, "insufficient role")
             ip, now = _client(request), time.monotonic()
             until = locked.get(ip)
             if until is not None:
@@ -127,7 +145,7 @@ def create_app(cfg: Config) -> FastAPI:
                 if hmac.compare_digest(x_api_key, key):
                     fails.pop(ip, None)
                     if ROLE_RANK[role] >= ROLE_RANK[min_role]:
-                        return role
+                        return Principal(role, role)
                     raise HTTPException(403, "insufficient role")
             _note_failure(ip, now)
             raise HTTPException(401, "invalid api key")
@@ -144,6 +162,10 @@ def create_app(cfg: Config) -> FastAPI:
             service=req.service.strip().lower(), user=req.user, ip=req.ip, group=d.group,
             direction=req.direction, action=d.action, reason=d.reason, finding_types=types,
             latency_ms=latency, masked_text=d.forward_text, original=req.text)
+        if d.action != "allow" or types:
+            siem.emit("prompt." + d.action, action=d.action, name=f"prompt {d.action}",
+                      service=req.service, user=req.user, src=req.ip, group=d.group,
+                      types=",".join(types), reason=d.reason or "", rid=request_id.get())
         return {
             "event_id": event_id, "action": d.action, "reason": d.reason,
             "text": d.forward_text,  # None when blocked
@@ -196,11 +218,13 @@ def create_app(cfg: Config) -> FastAPI:
 
     # ---- admin ----------------------------------------------------------
     @app.get("/v1/events/{event_id}/original")
-    def original(event_id: int, role: str = Depends(require("admin"))):
+    def original(event_id: int, principal: Principal = Depends(require("admin"))):
         row = store.get_event(event_id)
         if row is None:
             raise HTTPException(404, "event not found")
-        store.audit(role, "VIEW_ORIGINAL", f"event:{event_id}")
+        store.audit(str(principal), "VIEW_ORIGINAL", f"event:{event_id}")
+        siem.emit("audit.view_original", name="original viewed",
+                  actor=str(principal), target=f"event:{event_id}", rid=request_id.get())
         return {"event_id": event_id, "original": store.decrypt_original(row)}
 
     @app.get("/v1/policy")
@@ -208,15 +232,16 @@ def create_app(cfg: Config) -> FastAPI:
         return store.get_policy()
 
     @app.put("/v1/policy")
-    def put_policy(policy: Policy, role: str = Depends(require("admin"))):
-        store.set_policy(policy, actor=role)
-        store.audit(role, "UPDATE_POLICY", "policy")
+    def put_policy(policy: Policy, principal: Principal = Depends(require("admin"))):
+        store.set_policy(policy, actor=str(principal))
+        store.audit(str(principal), "UPDATE_POLICY", "policy")
+        siem.emit("audit.update_policy", name="policy updated", actor=str(principal), rid=request_id.get())
         return policy
 
     @app.post("/v1/keys/rotate")
-    def rotate_key(role: str = Depends(require("admin"))):
+    def rotate_key(principal: Principal = Depends(require("admin"))):
         n = store.rotate_data_key()
-        store.audit(role, "ROTATE_DATA_KEY", f"reencrypted:{n}")
+        store.audit(str(principal), "ROTATE_DATA_KEY", f"reencrypted:{n}")
         return {"reencrypted": n, "provider": store.key_provider_name}
 
     @app.get("/v1/audit")
@@ -252,14 +277,14 @@ def create_app(cfg: Config) -> FastAPI:
 
     @app.get("/v1/compliance/report")
     def compliance_report(period: str = "month", framework: str | None = None,
-                          role: str = Depends(require("admin"))):
-        store.audit(role, "EXPORT_COMPLIANCE_REPORT", f"framework={framework or 'all'};period={period}")
+                          principal: Principal = Depends(require("admin"))):
+        store.audit(str(principal), "EXPORT_COMPLIANCE_REPORT", f"framework={framework or 'all'};period={period}")
         return _report(period, framework)
 
     @app.get("/v1/compliance/report.csv")
     def compliance_report_csv(period: str = "month", framework: str | None = None,
-                              role: str = Depends(require("admin"))):
-        store.audit(role, "EXPORT_COMPLIANCE_REPORT", f"csv;framework={framework or 'all'};period={period}")
+                              principal: Principal = Depends(require("admin"))):
+        store.audit(str(principal), "EXPORT_COMPLIANCE_REPORT", f"csv;framework={framework or 'all'};period={period}")
         csv_text = compliance.to_csv(_report(period, framework))
         return Response(csv_text, media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": "attachment; filename=axfilter-compliance.csv"})

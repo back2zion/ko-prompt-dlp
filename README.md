@@ -41,6 +41,14 @@ python -m pytest                       # 41건 (SQLite 38 + 실 PostgreSQL 3; PG
 - **설정**: 모든 환경변수는 `AXFILTER_` 접두사 (`axfilter/server/.env.example` 참고), pydantic-settings로 중앙 관리
 - **로깅**: 구조화 JSON 로그 + 요청 ID. 프롬프트 원문·검출값은 로그에 남기지 않음(메타데이터만)
 
+### 인증·연동 (SSO / SIEM)
+- **SSO(OIDC)**: API 키에 더해 `Authorization: Bearer <JWT>` 허용. IdP의 JWKS로 RS256 검증, iss/aud/exp 확인,
+  그룹 클레임→역할 매핑(`AXFILTER_OIDC_ROLE_MAP`). 감사로그의 행위자가 토큰의 이메일/서브젝트로 기록됨.
+  (`AXFILTER_OIDC_ISSUER/AUDIENCE/JWKS_URL/ROLE_CLAIM/ROLE_MAP`, 폐쇄망은 `OIDC_JWKS_JSON` 인라인)
+- **SIEM 연동**: 검사·감사 이벤트를 **CEF / RFC5424 syslog / JSON**으로 전송(file 또는 UDP). 
+  **메타데이터만 전송**(서비스·사용자·IP·검출유형·조치·요청ID) — 프롬프트 원문·검출값은 제외.
+  (`AXFILTER_SIEM_SINK/FORMAT/TARGET`)
+
 ### 컴플라이언스 증적
 ISMS-P / ISO 27001 심사 대응용 증적 자료를 생성합니다(인증 보장이 아닌 **증적 자료**이며 통제 매핑은 참고용).
 - `GET /v1/compliance/report?period=&framework=` — 서명(HMAC-SHA256)된 JSON 리포트

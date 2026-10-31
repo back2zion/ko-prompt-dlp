@@ -34,6 +34,19 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_json: bool = True
 
+    # SIEM forwarding (metadata only)
+    siem_sink: str = "none"          # none | file | udp
+    siem_format: str = "cef"         # cef | syslog | json
+    siem_target: str = ""            # file path, or host:port for udp
+
+    # OIDC SSO (bearer tokens, in addition to API keys)
+    oidc_issuer: str = ""
+    oidc_audience: str = ""
+    oidc_jwks_url: str = ""
+    oidc_jwks_json: str = ""          # inline JWKS for air-gapped / testing
+    oidc_role_claim: str = "groups"
+    oidc_role_map: str = ""           # JSON: {"idp-group": "admin", ...}
+
     def resolved_keys(self) -> dict[str, str]:
         out = {}
         for role in ("agent", "viewer", "admin"):
