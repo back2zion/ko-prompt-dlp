@@ -41,6 +41,14 @@ python -m pytest                       # 41건 (SQLite 38 + 실 PostgreSQL 3; PG
 - **설정**: 모든 환경변수는 `AXFILTER_` 접두사 (`axfilter/server/.env.example` 참고), pydantic-settings로 중앙 관리
 - **로깅**: 구조화 JSON 로그 + 요청 ID. 프롬프트 원문·검출값은 로그에 남기지 않음(메타데이터만)
 
+### 강제 차단 (이그레스 게이트웨이 / 네트워크 프록시)
+확장은 사용자가 끌 수 있어 우회 가능합니다. 서버·앱 트래픽까지 강제하려면:
+- **LLM 이그레스 게이트웨이**(`/gateway/v1/chat/completions`): 사내 앱의 OpenAI `base_url`을 이 게이트웨이로 지정.
+  프롬프트를 검사해 **차단은 업스트림 미도달(403), 마스킹은 치환 후 전달, 허용은 통과**. 공급자 API 키는 게이트웨이가 주입.
+  공급자로의 egress를 게이트웨이로만 제한하면 호출 앱이 우회할 수 없음. (`AXFILTER_GATEWAY_UPSTREAM`, `AXFILTER_GATEWAY_UPSTREAM_KEY`)
+- **투명 프록시**(`deploy/mitmproxy_addon.py`): 브라우저 포함 모든 egress를 가로채는 옵션. mitmproxy CA를 단말에 배포(MDM) 필요,
+  TLS 가로채기는 정책·법령 준수 전제. *이 저장소 테스트로는 미검증(라이브 프록시·단말 필요).*
+
 ### 인증·연동 (SSO / SIEM)
 - **SSO(OIDC)**: API 키에 더해 `Authorization: Bearer <JWT>` 허용. IdP의 JWKS로 RS256 검증, iss/aud/exp 확인,
   그룹 클레임→역할 매핑(`AXFILTER_OIDC_ROLE_MAP`). 감사로그의 행위자가 토큰의 이메일/서브젝트로 기록됨.

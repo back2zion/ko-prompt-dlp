@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     oidc_role_claim: str = "groups"
     oidc_role_map: str = ""           # JSON: {"idp-group": "admin", ...}
 
+    # LLM egress gateway (OpenAI-compatible reverse proxy that enforces inspection)
+    gateway_upstream: str = ""        # provider base URL, e.g. https://api.openai.com
+    gateway_upstream_key: str = ""
+
     def resolved_keys(self) -> dict[str, str]:
         out = {}
         for role in ("agent", "viewer", "admin"):

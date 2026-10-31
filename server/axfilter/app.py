@@ -40,6 +40,9 @@ class Config:
     cors_origins: tuple[str, ...] = ()        # dashboard origins allowed to call the API
     siem: SiemForwarder | None = None
     oidc: object | None = None                # oidc.Verifier or None
+    gateway_upstream: str = ""                # LLM provider base URL; enables the egress gateway
+    gateway_upstream_key: str = ""            # provider API key injected by the gateway
+    http_client: object | None = None         # injected httpx.Client (testing)
 
 
 def config_from_env(settings: Settings | None = None) -> Config:
@@ -57,7 +60,8 @@ def config_from_env(settings: Settings | None = None) -> Config:
                   auth_window_seconds=st.auth_window_seconds,
                   auth_lockout_seconds=st.auth_lockout_seconds,
                   siem=SiemForwarder(sink=st.siem_sink, fmt=st.siem_format, target=st.siem_target),
-                  oidc=verifier_from_settings(st))
+                  oidc=verifier_from_settings(st),
+                  gateway_upstream=st.gateway_upstream, gateway_upstream_key=st.gateway_upstream_key)
 
 
 class InspectRequest(BaseModel):
@@ -296,5 +300,9 @@ def create_app(cfg: Config) -> FastAPI:
     @app.get("/healthz")
     def healthz():
         return {"ok": True}
+
+    if cfg.gateway_upstream:
+        from .gateway import register_gateway
+        register_gateway(app, cfg, store, siem, require)
 
     return app

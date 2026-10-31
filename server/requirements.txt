@@ -8,5 +8,5 @@ SQLAlchemy
 psycopg2-binary   # PostgreSQL
 alembic           # migrations
 pytest            # tests
-httpx             # tests
+httpx             # gateway runtime + tests
 pyjwt[crypto]    # OIDC SSO (bearer tokens)
