@@ -1,0 +1,859 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AX필터 관리 콘솔</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  /* Admin console: shares the dashboard's token system (light first, then dark overrides).
+     Accent = indigo; action colors (allow/mask/block) reused across the policy editor. */
+  :root {
+    --bg: #eef1f6; --surface: #ffffff; --surface-2: #f7f9fc;
+    --ink: #1a2233; --ink-soft: #46506a; --muted: #6b7687; --line: #e3e8f0;
+    --accent: #3b5bdb; --accent-soft: #e7ecfe;
+    --allow: #2f9e6f; --detect: #3b5bdb; --block: #e03131; --mask: #e8a13a;
+    --shadow: 0 1px 2px rgba(20,30,60,.05), 0 8px 24px rgba(20,30,60,.05);
+    --r: 14px; --font: "IBM Plex Sans KR", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: ui-monospace, "SFMono-Regular", "Menlo", "Consolas", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #0e1320; --surface: #161d2e; --surface-2: #1b2334;
+      --ink: #e8edf6; --ink-soft: #b9c2d6; --muted: #8893a8; --line: #2a3345;
+      --accent: #7d94f6; --accent-soft: #23304f;
+      --allow: #4bd39a; --detect: #7d94f6; --block: #ff7076; --mask: #f3bd6a;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 28px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #0e1320; --surface: #161d2e; --surface-2: #1b2334;
+    --ink: #e8edf6; --ink-soft: #b9c2d6; --muted: #8893a8; --line: #2a3345;
+    --accent: #7d94f6; --accent-soft: #23304f;
+    --allow: #4bd39a; --detect: #7d94f6; --block: #ff7076; --mask: #f3bd6a;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 28px rgba(0,0,0,.35);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg); color: var(--ink); font-family: var(--font);
+    font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased;
+    font-variant-numeric: tabular-nums;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 20px 16px 56px; }
+
+  header.top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .logo { width: 30px; height: 30px; border-radius: 8px; background: var(--accent);
+    display: grid; place-items: center; color: #fff; font-weight: 700; }
+  .brand h1 { font-size: 18px; font-weight: 700; margin: 0; letter-spacing: -.01em; }
+  .brand .sub { color: var(--muted); font-size: 12.5px; }
+  .spacer { flex: 1 1 auto; }
+  .conn { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--block); }
+  .dot.live { background: var(--allow); }
+  button, .tab { font-family: inherit; cursor: pointer; }
+  .btn { border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+    border-radius: 9px; padding: 7px 12px; font-size: 12.5px; font-weight: 500; }
+  .btn:hover { border-color: var(--accent); }
+  .btn:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible,
+  textarea:focus-visible, .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn.danger { color: var(--block); border-color: var(--block); background: var(--surface); }
+  .btn[disabled] { opacity: .5; cursor: not-allowed; }
+
+  /* tabs */
+  .tabs { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--line);
+    margin-bottom: 18px; }
+  .tab { border: 0; background: transparent; color: var(--ink-soft); padding: 10px 14px;
+    font-size: 13px; font-weight: 500; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+  .tab:hover { color: var(--ink); }
+  .panelwrap { outline: none; }
+
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
+    box-shadow: var(--shadow); padding: 16px 18px; margin-bottom: 14px; }
+  .panel h2 { font-size: 14.5px; font-weight: 600; margin: 0 0 12px; display: flex;
+    align-items: center; gap: 8px; flex-wrap: wrap; }
+  .panel h2 .hint { color: var(--muted); font-weight: 400; font-size: 12px; }
+  .panel .pbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+  .grow { flex: 1 1 auto; }
+
+  label { display: block; font-size: 12.5px; color: var(--ink-soft); margin: 12px 0 4px; font-weight: 500; }
+  input[type=text], input[type=password], input[type=number], select, textarea {
+    width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px;
+    background: var(--surface-2); color: var(--ink); font-family: inherit; font-size: 13px; }
+  textarea { min-height: 120px; resize: vertical; font-family: var(--mono); font-size: 12.5px; line-height: 1.6; }
+  select { cursor: pointer; }
+  .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; }
+  .inline { display: inline-flex; align-items: center; gap: 8px; }
+  .toggle { display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+    border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); margin-top: 8px; }
+  .toggle input { width: auto; }
+  .toggle .lbl { font-size: 13px; font-weight: 500; }
+  .toggle .desc { font-size: 11.5px; color: var(--muted); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { text-align: left; padding: 8px 9px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  thead th { color: var(--muted); font-weight: 500; font-size: 11.5px; white-space: nowrap; }
+  tbody tr:last-child td { border-bottom: 0; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .scroll { overflow-x: auto; }
+  .mono { font-family: var(--mono); font-size: 11.5px; }
+  .hashcell { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px;
+    font-weight: 600; border: 1px solid transparent; }
+  .badge.allow { color: var(--allow); background: color-mix(in srgb, var(--allow) 14%, transparent); }
+  .badge.mask  { color: var(--mask);  background: color-mix(in srgb, var(--mask) 16%, transparent); }
+  .badge.block { color: var(--block); background: color-mix(in srgb, var(--block) 14%, transparent); }
+  .badge.ok    { color: var(--allow); background: color-mix(in srgb, var(--allow) 14%, transparent); }
+  .badge.warn  { color: var(--mask);  background: color-mix(in srgb, var(--mask) 16%, transparent); }
+  .badge.bad   { color: var(--block); background: color-mix(in srgb, var(--block) 14%, transparent); }
+
+  .status { font-size: 12.5px; min-height: 18px; }
+  .status.ok { color: var(--allow); }
+  .status.err { color: var(--block); }
+  .status.info { color: var(--muted); }
+
+  /* empty / disconnected state */
+  .empty { text-align: center; color: var(--muted); padding: 40px 16px; }
+  .empty .big { font-size: 15px; font-weight: 600; color: var(--ink-soft); margin-bottom: 6px; }
+  .empty p { margin: 4px 0; font-size: 12.5px; }
+
+  .warnbox { border: 1px solid var(--block); background: color-mix(in srgb, var(--block) 8%, transparent);
+    border-radius: 10px; padding: 10px 12px; font-size: 12px; color: var(--ink-soft); margin: 10px 0; }
+  .warnbox strong { color: var(--block); }
+
+  .pager { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); margin-top: 12px; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip { font-size: 11px; padding: 1px 7px; border-radius: 6px; background: var(--accent-soft);
+    color: var(--accent); border: 1px solid transparent; }
+
+  pre.json { background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px; overflow: auto; font-family: var(--mono); font-size: 11.5px; line-height: 1.55;
+    max-height: 420px; margin: 0; white-space: pre-wrap; word-break: break-word; }
+
+  footer { color: var(--muted); font-size: 11.5px; margin-top: 10px; text-align: center; }
+
+  dialog { border: 1px solid var(--line); border-radius: 14px; background: var(--surface);
+    color: var(--ink); max-width: 440px; width: calc(100% - 32px); box-shadow: var(--shadow); padding: 20px; }
+  dialog::backdrop { background: rgba(10,15,30,.5); }
+  dialog h3 { margin: 0 0 4px; font-size: 15px; }
+  dialog .sub { color: var(--muted); font-size: 12.5px; }
+  dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
+  .err { color: var(--block); font-size: 12px; margin-top: 10px; min-height: 16px; }
+
+  .hidden { display: none !important; }
+  @media (max-width: 760px) {
+    .field-grid { grid-template-columns: 1fr; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <div class="logo">AX</div>
+      <div>
+        <h1>AX필터 관리 콘솔</h1>
+        <div class="sub">정책·감사·컴플라이언스를 관리합니다. (관리자 전용)</div>
+      </div>
+    </div>
+    <div class="spacer"></div>
+    <div class="conn"><span class="dot" id="dot"></span><span id="connText">연결 안 됨</span></div>
+    <button class="btn primary" id="cfgBtn">서버 연결</button>
+  </header>
+
+  <div class="tabs" role="tablist" aria-label="관리 메뉴">
+    <button class="tab" role="tab" id="tab-policy"     aria-controls="pane-policy"     data-pane="policy"     aria-selected="true">정책 편집</button>
+    <button class="tab" role="tab" id="tab-history"    aria-controls="pane-history"    data-pane="history"    aria-selected="false">정책 이력</button>
+    <button class="tab" role="tab" id="tab-audit"      aria-controls="pane-audit"      data-pane="audit"      aria-selected="false">감사 로그</button>
+    <button class="tab" role="tab" id="tab-events"     aria-controls="pane-events"     data-pane="events"     aria-selected="false">이용 이력</button>
+    <button class="tab" role="tab" id="tab-compliance" aria-controls="pane-compliance" data-pane="compliance" aria-selected="false">컴플라이언스</button>
+  </div>
+
+  <!-- ============ 1) 정책 편집 ============ -->
+  <section class="panelwrap" role="tabpanel" id="pane-policy" aria-labelledby="tab-policy" tabindex="0">
+    <div class="panel">
+      <h2>정책 편집 <span class="hint">GET/PUT /v1/policy · 저장 시 이력에 버전이 기록됩니다.</span></h2>
+      <div class="pbar">
+        <button class="btn" id="policyLoad">현재 정책 불러오기</button>
+        <button class="btn primary" id="policySave" disabled>정책 저장 (PUT)</button>
+        <span class="grow"></span>
+        <span class="status" id="policyStatus"></span>
+      </div>
+      <div id="policyEmpty" class="empty">
+        <div class="big">연결 안 됨</div>
+        <p>우측 상단 "서버 연결"에서 관리자(admin) API 키를 입력하면 현재 정책을 불러옵니다.</p>
+        <p>키가 없어도 이 화면은 정상적으로 표시됩니다.</p>
+      </div>
+      <form id="policyForm" class="hidden">
+        <div class="field-grid">
+          <div>
+            <label for="pDefaultService">기본 서비스 정책 (default_service)</label>
+            <select id="pDefaultService">
+              <option value="allow">allow — 목록에 없는 서비스 허용</option>
+              <option value="block">block — 목록에 없는 서비스 차단</option>
+            </select>
+          </div>
+          <div>
+            <label for="pBlockMessage">차단 안내 문구 (block_message)</label>
+            <input type="text" id="pBlockMessage" placeholder="차단 시 사용자에게 표시할 메시지" />
+          </div>
+        </div>
+
+        <label>개인정보 유형별 조치 (type_actions) — allow / mask / block</label>
+        <div class="scroll">
+          <table id="typeActionsTable">
+            <thead><tr><th>유형</th><th>조치</th><th>유형</th><th>조치</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <label>AI 서비스별 허용/차단 (services)</label>
+        <div class="scroll">
+          <table id="servicesTable">
+            <thead><tr><th>서비스 ID</th><th>정책</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="inline" style="margin-top:8px">
+          <input type="text" id="svcNewName" placeholder="서비스 ID (예: chatgpt)" style="max-width:220px" />
+          <button type="button" class="btn" id="svcAdd">서비스 추가</button>
+        </div>
+
+        <label for="pKeywords">차단 키워드 (keywords) — 한 줄에 하나씩</label>
+        <textarea id="pKeywords" placeholder="대외비&#10;사업자등록번호&#10;..."></textarea>
+
+        <div class="field-grid" style="margin-top:4px">
+          <label class="toggle" for="pDetectNames">
+            <input type="checkbox" id="pDetectNames" />
+            <span><span class="lbl">이름 탐지 (detect_names)</span><br><span class="desc">인명 개체(NER) 탐지를 사용합니다.</span></span>
+          </label>
+          <label class="toggle" for="pDetectAddresses">
+            <input type="checkbox" id="pDetectAddresses" />
+            <span><span class="lbl">주소 탐지 (detect_addresses)</span><br><span class="desc">주소 개체 탐지를 사용합니다.</span></span>
+          </label>
+        </div>
+
+        <details style="margin-top:14px">
+          <summary style="cursor:pointer;font-size:12.5px;color:var(--ink-soft)">그룹·시간 규칙 (groups / time_rules) — 원본 JSON으로 편집</summary>
+          <label for="pGroups">groups (JSON 배열)</label>
+          <textarea id="pGroups" placeholder='[{"name":"개발팀","cidrs":["10.0.0.0/24"]}]'></textarea>
+          <label for="pTimeRules">time_rules (JSON 배열)</label>
+          <textarea id="pTimeRules" placeholder='[{"group":"개발팀","start":"09:00","end":"18:00"}]'></textarea>
+        </details>
+      </form>
+    </div>
+  </section>
+
+  <!-- ============ 2) 정책 이력 ============ -->
+  <section class="panelwrap hidden" role="tabpanel" id="pane-history" aria-labelledby="tab-history" tabindex="0">
+    <div class="panel">
+      <h2>정책 이력 <span class="hint">GET /v1/policy/history</span></h2>
+      <div class="pbar">
+        <button class="btn" id="historyLoad">이력 불러오기</button>
+        <span class="grow"></span>
+        <span class="status" id="historyStatus"></span>
+      </div>
+      <div id="historyEmpty" class="empty">
+        <div class="big">연결 안 됨</div>
+        <p>관리자 키로 연결한 뒤 정책 변경 버전 목록을 조회합니다.</p>
+      </div>
+      <div class="scroll hidden" id="historyWrap">
+        <table id="historyTable">
+          <thead><tr><th class="num">버전</th><th>변경 시각</th><th>변경자</th><th>해시</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="panel hidden" id="historyDetail">
+      <h2>버전 <span id="histVerNo"></span> JSON <span class="hint" id="histVerMeta"></span></h2>
+      <pre class="json" id="histVerJson"></pre>
+    </div>
+  </section>
+
+  <!-- ============ 3) 감사 로그 ============ -->
+  <section class="panelwrap hidden" role="tabpanel" id="pane-audit" aria-labelledby="tab-audit" tabindex="0">
+    <div class="panel">
+      <h2>감사 로그 <span class="hint">GET /v1/audit/search · 해시 체인 무결성 검증</span></h2>
+      <div class="pbar">
+        <div class="inline"><label for="aActor" style="margin:0">행위자</label>
+          <input type="text" id="aActor" placeholder="actor (예: admin)" style="max-width:150px" /></div>
+        <div class="inline"><label for="aAction" style="margin:0">액션</label>
+          <input type="text" id="aAction" placeholder="action" style="max-width:170px" list="actionList" />
+          <datalist id="actionList">
+            <option value="UPDATE_POLICY"></option>
+            <option value="VIEW_ORIGINAL"></option>
+            <option value="ROTATE_DATA_KEY"></option>
+            <option value="EXPORT_COMPLIANCE_REPORT"></option>
+          </datalist></div>
+        <div class="inline"><label for="aPeriod" style="margin:0">기간</label>
+          <select id="aPeriod" style="max-width:120px">
+            <option value="">전체</option>
+            <option value="today">오늘</option>
+            <option value="week" selected>최근 7일</option>
+            <option value="month">최근 30일</option>
+            <option value="quarter">최근 90일</option>
+          </select></div>
+        <button class="btn primary" id="auditSearch">검색</button>
+        <span class="grow"></span>
+        <span class="status" id="auditStatus"></span>
+      </div>
+      <div id="auditEmpty" class="empty">
+        <div class="big">연결 안 됨</div>
+        <p>관리자 키로 연결한 뒤 행위자·액션·기간으로 감사 로그를 검색합니다.</p>
+      </div>
+      <div class="scroll hidden" id="auditWrap">
+        <table id="auditTable">
+          <thead><tr><th class="num">ID</th><th>시각</th><th>행위자</th><th>액션</th><th>대상</th><th>해시</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="pager hidden" id="auditPager">
+        <button class="btn" id="auditPrev">이전</button>
+        <span id="auditPageLabel"></span>
+        <button class="btn" id="auditNext">다음</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 4) 이용 이력 ============ -->
+  <section class="panelwrap hidden" role="tabpanel" id="pane-events" aria-labelledby="tab-events" tabindex="0">
+    <div class="panel">
+      <h2>이용 이력 <span class="hint">GET /v1/events · 원문은 관리자만 열람하며 감사 기록이 남습니다.</span></h2>
+      <div class="pbar">
+        <div class="inline"><label for="eAction" style="margin:0">조치</label>
+          <select id="eAction" style="max-width:140px">
+            <option value="">전체</option>
+            <option value="allow">allow</option>
+            <option value="mask">mask</option>
+            <option value="block">block</option>
+          </select></div>
+        <button class="btn primary" id="eventsLoad">조회</button>
+        <span class="grow"></span>
+        <span class="status" id="eventsStatus"></span>
+      </div>
+      <div class="warnbox">
+        <strong>주의</strong> — "원문 보기"는 암호화 저장된 프롬프트 원문을 복호화합니다. 열람 시 행위자·대상이 감사 로그(VIEW_ORIGINAL)에 기록되며 SIEM으로 전송됩니다.
+      </div>
+      <div id="eventsEmpty" class="empty">
+        <div class="big">연결 안 됨</div>
+        <p>관리자 또는 조회 권한 키로 연결한 뒤 이용 이력을 조회합니다.</p>
+      </div>
+      <div class="scroll hidden" id="eventsWrap">
+        <table id="eventsTable">
+          <thead><tr>
+            <th class="num">ID</th><th>시각</th><th>서비스</th><th>사용자</th><th>IP</th><th>그룹</th>
+            <th>방향</th><th>조치</th><th>사유</th><th>검출</th><th>원문</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="pager hidden" id="eventsPager">
+        <button class="btn" id="eventsPrev">이전</button>
+        <span id="eventsPageLabel"></span>
+        <button class="btn" id="eventsNext">다음</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 5) 컴플라이언스 ============ -->
+  <section class="panelwrap hidden" role="tabpanel" id="pane-compliance" aria-labelledby="tab-compliance" tabindex="0">
+    <div class="panel">
+      <h2>컴플라이언스 증적 <span class="hint">GET /v1/compliance/report · 심사 대응용 참고 자료</span></h2>
+      <div class="pbar">
+        <div class="inline"><label for="cPeriod" style="margin:0">기간</label>
+          <select id="cPeriod" style="max-width:120px">
+            <option value="today">오늘</option>
+            <option value="week">최근 7일</option>
+            <option value="month" selected>최근 30일</option>
+            <option value="quarter">최근 90일</option>
+          </select></div>
+        <div class="inline"><label for="cFramework" style="margin:0">프레임워크</label>
+          <select id="cFramework" style="max-width:150px">
+            <option value="">전체</option>
+            <option value="ISMS-P">ISMS-P</option>
+            <option value="ISO 27001">ISO 27001</option>
+          </select></div>
+        <button class="btn primary" id="compLoad">보고서 생성</button>
+        <a class="btn" id="compCsv" target="_blank" rel="noopener" href="#" aria-disabled="true">CSV 내보내기</a>
+        <span class="grow"></span>
+        <span class="status" id="compStatus"></span>
+      </div>
+      <div id="compEmpty" class="empty">
+        <div class="big">연결 안 됨</div>
+        <p>관리자 키로 연결한 뒤 ISMS-P / ISO 27001 통제 증적 보고서를 생성합니다.</p>
+      </div>
+      <div id="compResult" class="hidden">
+        <div class="warnbox" id="compDisclaimer"></div>
+        <div style="margin:4px 0 10px" class="chips" id="compMeta"></div>
+        <div class="scroll">
+          <table id="compControls">
+            <thead><tr><th>프레임워크</th><th>통제</th><th>통제명</th><th>요구사항</th><th>상태</th><th>증적 요약</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <h2 style="margin-top:18px">증적 요약 (evidence)</h2>
+        <div class="scroll">
+          <table id="compEvidence">
+            <thead><tr><th>항목</th><th>내용</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer id="foot">관리자 작업은 모두 감사 로그에 기록됩니다. API 키는 이 브라우저에만 저장되며 서버로 재전송되지 않습니다.</footer>
+</div>
+
+<dialog id="cfg">
+  <h3>AX필터 서버 연결 (관리자)</h3>
+  <div class="sub">관리자(admin) 권한 API 키로 관리 API에 연결합니다. 키는 이 브라우저(localStorage)에만 저장됩니다.</div>
+  <label for="apiBase">API 주소</label>
+  <input type="text" id="apiBase" placeholder="https://axfilter.example.com" />
+  <label for="apiKey">관리자 API 키 (admin)</label>
+  <input type="password" id="apiKey" placeholder="X-API-Key" />
+  <div class="err" id="cfgErr"></div>
+  <div class="row">
+    <button class="btn danger" id="cfgDisconnect">연결 해제</button>
+    <button class="btn" id="cfgCancel">취소</button>
+    <button class="btn primary" id="cfgSave">연결</button>
+  </div>
+</dialog>
+
+<script>
+(function () {
+  "use strict";
+  var LS = "axfilter.admin.conn";
+  var TYPE_LABELS = {
+    RRN: "주민등록번호", CARD: "카드번호", PHONE: "전화번호", EMAIL: "이메일",
+    BIZNO: "사업자번호", PASSPORT: "여권번호", SECRET: "비밀/키", NAME: "이름",
+    ADDRESS: "주소", KEYWORD: "키워드"
+  };
+  var ACTIONS = ["allow", "mask", "block"];
+  var conn = null;
+  try { conn = JSON.parse(localStorage.getItem(LS) || "null"); } catch (e) { conn = null; }
+
+  function qs(id) { return document.getElementById(id); }
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function fmtTs(ts) {
+    if (ts == null) return "";
+    var n = Number(ts);
+    if (!isFinite(n)) return String(ts);
+    var d = new Date(n * 1000);
+    if (isNaN(d.getTime())) return String(ts);
+    try { return d.toLocaleString("ko-KR", { timeZone: "Asia/Seoul", hour12: false }); }
+    catch (e) { return d.toISOString(); }
+  }
+  function connected() { return !!(conn && conn.base && conn.key); }
+  function baseUrl() { return conn.base.replace(/\/$/, ""); }
+
+  function setStatus(el, msg, kind) {
+    el.textContent = msg || "";
+    el.className = "status" + (kind ? " " + kind : "");
+  }
+
+  async function api(path, opts) {
+    opts = opts || {};
+    var headers = { "X-API-Key": conn.key };
+    if (opts.body != null) headers["Content-Type"] = "application/json";
+    var r = await fetch(baseUrl() + path, { method: opts.method || "GET", headers: headers, body: opts.body });
+    if (!r.ok) {
+      var detail = "";
+      try { var j = await r.json(); detail = j && j.detail ? " · " + (typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail)) : ""; } catch (e) {}
+      var hint = r.status === 401 ? " · 키를 확인하세요" : (r.status === 403 ? " · 관리자 권한이 필요합니다" : "");
+      throw new Error("HTTP " + r.status + hint + detail);
+    }
+    return r.json();
+  }
+
+  // ---------- connection reflect ----------
+  function reflectConn() {
+    var live = connected();
+    qs("dot").classList.toggle("live", live);
+    qs("connText").textContent = live ? ("연결됨 · " + conn.base.replace(/^https?:\/\//, "")) : "연결 안 됨";
+    toggleEmptyStates(live);
+    qs("compCsv").setAttribute("aria-disabled", live ? "false" : "true");
+    if (!live) { qs("compCsv").setAttribute("href", "#"); }
+  }
+  function toggleEmptyStates(live) {
+    // Each tab shows an empty state until data is loaded; empties always show when disconnected.
+    if (!live) {
+      ["policyEmpty", "historyEmpty", "auditEmpty", "eventsEmpty", "compEmpty"].forEach(function (id) { qs(id).classList.remove("hidden"); });
+      qs("policyForm").classList.add("hidden");
+      qs("policySave").disabled = true;
+      ["historyWrap", "historyDetail", "auditWrap", "auditPager", "eventsWrap", "eventsPager", "compResult"].forEach(function (id) { qs(id).classList.add("hidden"); });
+    }
+  }
+
+  // ---------- tabs ----------
+  var tabs = Array.prototype.slice.call(document.querySelectorAll(".tab"));
+  function selectTab(name) {
+    tabs.forEach(function (t) {
+      var on = t.dataset.pane === name;
+      t.setAttribute("aria-selected", on ? "true" : "false");
+      qs("pane-" + t.dataset.pane).classList.toggle("hidden", !on);
+    });
+  }
+  tabs.forEach(function (t, i) {
+    t.addEventListener("click", function () { selectTab(t.dataset.pane); });
+    t.addEventListener("keydown", function (e) {
+      var idx = i;
+      if (e.key === "ArrowRight") idx = (i + 1) % tabs.length;
+      else if (e.key === "ArrowLeft") idx = (i - 1 + tabs.length) % tabs.length;
+      else return;
+      e.preventDefault(); tabs[idx].focus(); selectTab(tabs[idx].dataset.pane);
+    });
+  });
+
+  // ========== 1) POLICY EDITOR ==========
+  function buildTypeActions(typeActions) {
+    var keys = Object.keys(TYPE_LABELS);
+    // keep any extra keys the server returns that we don't know about
+    Object.keys(typeActions || {}).forEach(function (k) { if (keys.indexOf(k) < 0) keys.push(k); });
+    var tb = qs("typeActionsTable").querySelector("tbody");
+    tb.innerHTML = "";
+    var row = null;
+    keys.forEach(function (k, i) {
+      if (i % 2 === 0) { row = document.createElement("tr"); tb.appendChild(row); }
+      var val = (typeActions && typeActions[k]) || "mask";
+      var label = (TYPE_LABELS[k] || k) + " (" + k + ")";
+      var td1 = document.createElement("td"); td1.textContent = label; row.appendChild(td1);
+      var td2 = document.createElement("td");
+      var sel = document.createElement("select");
+      sel.setAttribute("aria-label", label + " 조치");
+      sel.dataset.typekey = k;
+      ACTIONS.forEach(function (a) {
+        var o = document.createElement("option"); o.value = a; o.textContent = a;
+        if (a === val) o.selected = true; sel.appendChild(o);
+      });
+      td2.appendChild(sel); row.appendChild(td2);
+    });
+    if (keys.length % 2 === 1) { var pad = document.createElement("td"); row.appendChild(pad); row.appendChild(document.createElement("td")); }
+  }
+
+  function serviceRow(name, val) {
+    var tr = document.createElement("tr");
+    var tdN = document.createElement("td"); tdN.textContent = name; tdN.className = "mono"; tr.appendChild(tdN);
+    var tdS = document.createElement("td");
+    var sel = document.createElement("select");
+    sel.setAttribute("aria-label", name + " 정책"); sel.dataset.svckey = name;
+    ["allow", "block"].forEach(function (a) {
+      var o = document.createElement("option"); o.value = a; o.textContent = a;
+      if (a === val) o.selected = true; sel.appendChild(o);
+    });
+    tdS.appendChild(sel); tr.appendChild(tdS);
+    var tdX = document.createElement("td");
+    var del = document.createElement("button"); del.type = "button"; del.className = "btn danger"; del.textContent = "삭제";
+    del.addEventListener("click", function () { tr.remove(); });
+    tdX.appendChild(del); tr.appendChild(tdX);
+    return tr;
+  }
+
+  function fillPolicy(p) {
+    qs("pDefaultService").value = p.default_service || "allow";
+    qs("pBlockMessage").value = p.block_message || "";
+    buildTypeActions(p.type_actions || {});
+    var stb = qs("servicesTable").querySelector("tbody"); stb.innerHTML = "";
+    Object.keys(p.services || {}).forEach(function (k) { stb.appendChild(serviceRow(k, p.services[k])); });
+    qs("pKeywords").value = (p.keywords || []).join("\n");
+    qs("pDetectNames").checked = p.detect_names !== false;
+    qs("pDetectAddresses").checked = p.detect_addresses !== false;
+    qs("pGroups").value = JSON.stringify(p.groups || [], null, 2);
+    qs("pTimeRules").value = JSON.stringify(p.time_rules || [], null, 2);
+  }
+
+  function collectPolicy() {
+    var type_actions = {};
+    qs("typeActionsTable").querySelectorAll("select[data-typekey]").forEach(function (s) { type_actions[s.dataset.typekey] = s.value; });
+    var services = {};
+    qs("servicesTable").querySelectorAll("select[data-svckey]").forEach(function (s) { services[s.dataset.svckey] = s.value; });
+    var keywords = qs("pKeywords").value.split("\n").map(function (x) { return x.trim(); }).filter(Boolean);
+    var groups, time_rules;
+    try { groups = JSON.parse(qs("pGroups").value || "[]"); } catch (e) { throw new Error("groups JSON 형식 오류: " + e.message); }
+    try { time_rules = JSON.parse(qs("pTimeRules").value || "[]"); } catch (e) { throw new Error("time_rules JSON 형식 오류: " + e.message); }
+    return {
+      default_service: qs("pDefaultService").value,
+      services: services,
+      type_actions: type_actions,
+      detect_names: qs("pDetectNames").checked,
+      detect_addresses: qs("pDetectAddresses").checked,
+      keywords: keywords,
+      groups: groups,
+      time_rules: time_rules,
+      block_message: qs("pBlockMessage").value
+    };
+  }
+
+  async function loadPolicy() {
+    if (!connected()) return;
+    setStatus(qs("policyStatus"), "불러오는 중…", "info");
+    try {
+      var p = await api("/v1/policy");
+      fillPolicy(p);
+      qs("policyEmpty").classList.add("hidden");
+      qs("policyForm").classList.remove("hidden");
+      qs("policySave").disabled = false;
+      setStatus(qs("policyStatus"), "불러왔습니다.", "ok");
+    } catch (e) { setStatus(qs("policyStatus"), "오류: " + e.message, "err"); }
+  }
+  async function savePolicy() {
+    if (!connected()) return;
+    var body;
+    try { body = collectPolicy(); } catch (e) { setStatus(qs("policyStatus"), e.message, "err"); return; }
+    setStatus(qs("policyStatus"), "저장 중…", "info");
+    try {
+      var p = await api("/v1/policy", { method: "PUT", body: JSON.stringify(body) });
+      fillPolicy(p);
+      setStatus(qs("policyStatus"), "저장되었습니다. 새 버전이 이력에 기록되었습니다.", "ok");
+    } catch (e) { setStatus(qs("policyStatus"), "저장 실패: " + e.message, "err"); }
+  }
+  qs("policyLoad").addEventListener("click", loadPolicy);
+  qs("policySave").addEventListener("click", savePolicy);
+  qs("svcAdd").addEventListener("click", function () {
+    var name = qs("svcNewName").value.trim().toLowerCase();
+    if (!name) return;
+    var tb = qs("servicesTable").querySelector("tbody");
+    var exists = tb.querySelector('select[data-svckey="' + name.replace(/"/g, "") + '"]');
+    if (exists) { setStatus(qs("policyStatus"), "이미 추가된 서비스입니다: " + name, "err"); return; }
+    tb.appendChild(serviceRow(name, "allow"));
+    qs("svcNewName").value = "";
+  });
+
+  // ========== 2) POLICY HISTORY ==========
+  async function loadHistory() {
+    if (!connected()) return;
+    setStatus(qs("historyStatus"), "불러오는 중…", "info");
+    try {
+      var rows = await api("/v1/policy/history?limit=200");
+      var tb = qs("historyTable").querySelector("tbody"); tb.innerHTML = "";
+      rows.forEach(function (r) {
+        var tr = document.createElement("tr");
+        tr.innerHTML = '<td class="num">' + esc(r.id) + "</td><td>" + esc(fmtTs(r.ts)) +
+          "</td><td>" + esc(r.actor) + '</td><td class="hashcell">' + esc((r.hash || "").slice(0, 16)) + "…</td><td></td>";
+        var btn = document.createElement("button"); btn.className = "btn"; btn.textContent = "JSON 보기";
+        btn.addEventListener("click", function () { viewVersion(r.id); });
+        tr.lastChild.appendChild(btn);
+        tb.appendChild(tr);
+      });
+      qs("historyEmpty").classList.add("hidden");
+      qs("historyWrap").classList.remove("hidden");
+      setStatus(qs("historyStatus"), rows.length + "개 버전", "ok");
+    } catch (e) { setStatus(qs("historyStatus"), "오류: " + e.message, "err"); }
+  }
+  async function viewVersion(id) {
+    try {
+      var v = await api("/v1/policy/history/" + id);
+      qs("histVerNo").textContent = v.id;
+      qs("histVerMeta").textContent = fmtTs(v.ts) + " · " + v.actor + " · " + (v.hash || "").slice(0, 24) + "…";
+      var pretty = v.policy_json;
+      try { pretty = JSON.stringify(JSON.parse(v.policy_json), null, 2); } catch (e) {}
+      qs("histVerJson").textContent = pretty;
+      qs("historyDetail").classList.remove("hidden");
+      qs("historyDetail").scrollIntoView({ behavior: "smooth", block: "nearest" });
+    } catch (e) { setStatus(qs("historyStatus"), "버전 조회 오류: " + e.message, "err"); }
+  }
+  qs("historyLoad").addEventListener("click", loadHistory);
+
+  // ========== 3) AUDIT LOG ==========
+  var auditState = { offset: 0, limit: 50 };
+  async function loadAudit(resetOffset) {
+    if (!connected()) return;
+    if (resetOffset) auditState.offset = 0;
+    setStatus(qs("auditStatus"), "검색 중…", "info");
+    var q = [];
+    var actor = qs("aActor").value.trim(), action = qs("aAction").value.trim(), period = qs("aPeriod").value;
+    if (actor) q.push("actor=" + encodeURIComponent(actor));
+    if (action) q.push("action=" + encodeURIComponent(action));
+    if (period) q.push("period=" + encodeURIComponent(period));
+    q.push("limit=" + auditState.limit, "offset=" + auditState.offset);
+    try {
+      var rows = await api("/v1/audit/search?" + q.join("&"));
+      var tb = qs("auditTable").querySelector("tbody"); tb.innerHTML = "";
+      if (!rows.length && auditState.offset === 0) {
+        tb.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px">검색 결과가 없습니다.</td></tr>';
+      }
+      rows.forEach(function (r) {
+        var tr = document.createElement("tr");
+        tr.innerHTML = '<td class="num">' + esc(r.id) + "</td><td>" + esc(fmtTs(r.ts)) +
+          "</td><td>" + esc(r.actor) + "</td><td>" + esc(r.action) + '</td><td class="mono">' + esc(r.target) +
+          '</td><td class="hashcell">' + esc((r.hash || "").slice(0, 16)) + "…</td>";
+        tb.appendChild(tr);
+      });
+      qs("auditEmpty").classList.add("hidden");
+      qs("auditWrap").classList.remove("hidden");
+      qs("auditPager").classList.remove("hidden");
+      qs("auditPageLabel").textContent = (auditState.offset + 1) + "–" + (auditState.offset + rows.length);
+      qs("auditPrev").disabled = auditState.offset === 0;
+      qs("auditNext").disabled = rows.length < auditState.limit;
+      setStatus(qs("auditStatus"), rows.length + "건", "ok");
+    } catch (e) { setStatus(qs("auditStatus"), "오류: " + e.message, "err"); }
+  }
+  qs("auditSearch").addEventListener("click", function () { loadAudit(true); });
+  qs("auditPrev").addEventListener("click", function () { auditState.offset = Math.max(0, auditState.offset - auditState.limit); loadAudit(false); });
+  qs("auditNext").addEventListener("click", function () { auditState.offset += auditState.limit; loadAudit(false); });
+
+  // ========== 4) EVENTS ==========
+  var eventsState = { offset: 0, limit: 50 };
+  function actionBadge(a) { return '<span class="badge ' + esc(a) + '">' + esc(a) + "</span>"; }
+  async function loadEvents(resetOffset) {
+    if (!connected()) return;
+    if (resetOffset) eventsState.offset = 0;
+    setStatus(qs("eventsStatus"), "조회 중…", "info");
+    var q = ["limit=" + eventsState.limit, "offset=" + eventsState.offset];
+    var action = qs("eAction").value;
+    if (action) q.push("action=" + encodeURIComponent(action));
+    try {
+      var rows = await api("/v1/events?" + q.join("&"));
+      var tb = qs("eventsTable").querySelector("tbody"); tb.innerHTML = "";
+      if (!rows.length && eventsState.offset === 0) {
+        tb.innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--muted);padding:24px">이력이 없습니다.</td></tr>';
+      }
+      rows.forEach(function (r) {
+        var types = (r.finding_types || []).map(function (t) { return '<span class="chip">' + esc(t) + "</span>"; }).join(" ");
+        var tr = document.createElement("tr");
+        tr.innerHTML = '<td class="num">' + esc(r.id) + "</td><td>" + esc(fmtTs(r.ts)) +
+          "</td><td>" + esc(r.service) + "</td><td>" + esc(r.user) + '</td><td class="mono">' + esc(r.ip) +
+          "</td><td>" + esc(r.grp) + "</td><td>" + esc(r.direction) + "</td><td>" + actionBadge(r.action) +
+          "</td><td>" + esc(r.reason || "") + '</td><td><div class="chips">' + types + "</div></td>";
+        var tdO = document.createElement("td");
+        if (r.finding_types && r.finding_types.length) {
+          var btn = document.createElement("button"); btn.className = "btn"; btn.textContent = "원문 보기";
+          btn.addEventListener("click", function () { revealOriginal(r.id, tdO, btn); });
+          tdO.appendChild(btn);
+        } else {
+          tdO.innerHTML = '<span style="color:var(--muted)">없음</span>';
+        }
+        tr.appendChild(tdO);
+        tb.appendChild(tr);
+      });
+      qs("eventsEmpty").classList.add("hidden");
+      qs("eventsWrap").classList.remove("hidden");
+      qs("eventsPager").classList.remove("hidden");
+      qs("eventsPageLabel").textContent = (eventsState.offset + 1) + "–" + (eventsState.offset + rows.length);
+      qs("eventsPrev").disabled = eventsState.offset === 0;
+      qs("eventsNext").disabled = rows.length < eventsState.limit;
+      setStatus(qs("eventsStatus"), rows.length + "건", "ok");
+    } catch (e) { setStatus(qs("eventsStatus"), "오류: " + e.message, "err"); }
+  }
+  async function revealOriginal(id, cell, btn) {
+    if (!window.confirm("이벤트 #" + id + "의 원문을 열람합니다.\n열람 사실이 감사 로그(VIEW_ORIGINAL)에 기록됩니다. 계속하시겠습니까?")) return;
+    btn.disabled = true; btn.textContent = "열람 중…";
+    try {
+      var r = await api("/v1/events/" + id + "/original");
+      cell.innerHTML = "";
+      var pre = document.createElement("pre"); pre.className = "json"; pre.style.maxWidth = "320px";
+      pre.textContent = r.original == null ? "(원문 없음)" : r.original;
+      cell.appendChild(pre);
+    } catch (e) {
+      btn.disabled = false; btn.textContent = "원문 보기";
+      setStatus(qs("eventsStatus"), "원문 열람 실패: " + e.message, "err");
+    }
+  }
+  qs("eventsLoad").addEventListener("click", function () { loadEvents(true); });
+  qs("eventsPrev").addEventListener("click", function () { eventsState.offset = Math.max(0, eventsState.offset - eventsState.limit); loadEvents(false); });
+  qs("eventsNext").addEventListener("click", function () { eventsState.offset += eventsState.limit; loadEvents(false); });
+
+  // ========== 5) COMPLIANCE ==========
+  function statusBadge(s) {
+    var cls = s === "충족" ? "ok" : (s === "미충족" ? "bad" : "warn");
+    return '<span class="badge ' + cls + '">' + esc(s) + "</span>";
+  }
+  function updateCsvLink() {
+    if (!connected()) return;
+    var q = ["period=" + encodeURIComponent(qs("cPeriod").value)];
+    var fw = qs("cFramework").value;
+    if (fw) q.push("framework=" + encodeURIComponent(fw));
+    // Note: browsers cannot send X-API-Key on a plain anchor download; the link opens the
+    // endpoint and the server auth applies. Shown for convenience; keep it informative.
+    qs("compCsv").setAttribute("href", baseUrl() + "/v1/compliance/report.csv?" + q.join("&"));
+  }
+  async function loadCompliance() {
+    if (!connected()) return;
+    setStatus(qs("compStatus"), "생성 중…", "info");
+    var q = ["period=" + encodeURIComponent(qs("cPeriod").value)];
+    var fw = qs("cFramework").value;
+    if (fw) q.push("framework=" + encodeURIComponent(fw));
+    try {
+      var rep = await api("/v1/compliance/report?" + q.join("&"));
+      qs("compDisclaimer").innerHTML = "<strong>참고</strong> — " + esc(rep.disclaimer || "");
+      var meta = [];
+      if (rep.report_id) meta.push('<span class="chip">보고서 ' + esc(rep.report_id.slice(0, 8)) + "</span>");
+      if (rep.generated_at) meta.push('<span class="chip">생성 ' + esc(rep.generated_at) + "</span>");
+      if (rep.period) meta.push('<span class="chip">기간 ' + esc(rep.period.days) + "일</span>");
+      if (rep.signature) meta.push('<span class="chip">서명 ' + esc(rep.signature.alg) + "</span>");
+      qs("compMeta").innerHTML = meta.join(" ");
+      var cb = qs("compControls").querySelector("tbody"); cb.innerHTML = "";
+      (rep.controls || []).forEach(function (c) {
+        var tr = document.createElement("tr");
+        tr.innerHTML = "<td>" + esc(c.framework) + '</td><td class="mono">' + esc(c.control_id) +
+          "</td><td>" + esc(c.control_name) + "</td><td>" + esc(c.requirement) +
+          "</td><td>" + statusBadge(c.status) + "</td><td>" + esc(c.evidence_summary) + "</td>";
+        cb.appendChild(tr);
+      });
+      var eb = qs("compEvidence").querySelector("tbody"); eb.innerHTML = "";
+      var ev = rep.evidence || {};
+      Object.keys(ev).forEach(function (k) {
+        if (k === "original_access_log") return; // large list; summarized via access_control count
+        var tr = document.createElement("tr");
+        tr.innerHTML = '<td class="mono">' + esc(k) + '</td><td class="mono">' + esc(JSON.stringify(ev[k])) + "</td>";
+        eb.appendChild(tr);
+      });
+      updateCsvLink();
+      qs("compEmpty").classList.add("hidden");
+      qs("compResult").classList.remove("hidden");
+      setStatus(qs("compStatus"), "생성 완료", "ok");
+    } catch (e) { setStatus(qs("compStatus"), "오류: " + e.message, "err"); }
+  }
+  qs("compLoad").addEventListener("click", loadCompliance);
+  qs("cPeriod").addEventListener("change", updateCsvLink);
+  qs("cFramework").addEventListener("change", updateCsvLink);
+  qs("compCsv").addEventListener("click", function (e) {
+    if (!connected()) { e.preventDefault(); setStatus(qs("compStatus"), "먼저 서버에 연결하세요.", "err"); }
+  });
+
+  // ---------- settings dialog ----------
+  qs("cfgBtn").addEventListener("click", function () {
+    if (conn) { qs("apiBase").value = conn.base || ""; qs("apiKey").value = conn.key || ""; }
+    qs("cfgErr").textContent = ""; qs("cfg").showModal();
+  });
+  qs("cfgCancel").addEventListener("click", function () { qs("cfg").close(); });
+  qs("cfgDisconnect").addEventListener("click", function () {
+    conn = null; try { localStorage.removeItem(LS); } catch (e) {}
+    qs("cfg").close(); reflectConn();
+  });
+  qs("cfgSave").addEventListener("click", async function () {
+    var base = qs("apiBase").value.trim(), key = qs("apiKey").value.trim();
+    if (!base || !key) { qs("cfgErr").textContent = "주소와 키를 모두 입력하세요."; return; }
+    try {
+      var r = await fetch(base.replace(/\/$/, "") + "/v1/policy", { headers: { "X-API-Key": key } });
+      if (!r.ok) throw new Error("HTTP " + r.status + (r.status === 401 ? " · 키를 확인하세요" : (r.status === 403 ? " · 관리자 권한이 필요합니다" : "")));
+    } catch (e) {
+      qs("cfgErr").textContent = "연결 실패: " + e.message; return;
+    }
+    conn = { base: base, key: key };
+    try { localStorage.setItem(LS, JSON.stringify(conn)); } catch (e) {}
+    qs("cfg").close(); reflectConn();
+    loadPolicy();
+  });
+
+  // ---------- init ----------
+  selectTab("policy");
+  reflectConn();
+  if (connected()) { loadPolicy(); }
+})();
+</script>
+</body>
+</html>
