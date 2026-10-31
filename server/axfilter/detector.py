@@ -5,6 +5,8 @@ import re
 from dataclasses import dataclass
 from datetime import date
 
+from . import recognizers
+
 LABELS = {
     "RRN": "주민등록번호",
     "CARD": "신용카드번호",
@@ -13,6 +15,8 @@ LABELS = {
     "BIZNO": "사업자등록번호",
     "PASSPORT": "여권번호",
     "SECRET": "자격증명/비밀키",
+    "NAME": "이름",
+    "ADDRESS": "주소",
     "KEYWORD": "사내 키워드",
 }
 
@@ -22,6 +26,8 @@ class Finding:
     type: str
     start: int
     end: int
+    score: float = 1.0
+    source: str = "rule"
 
     @property
     def label(self) -> str:
@@ -141,9 +147,13 @@ def _scan(text: str, keywords: list[str]) -> list[Finding]:
     return out
 
 
-def detect(text: str, keywords: list[str] | None = None) -> list[Finding]:
+def detect(text: str, keywords: list[str] | None = None, *,
+           names: bool = True, addresses: bool = True) -> list[Finding]:
     """Return non-overlapping findings ordered by position (longest wins)."""
-    found = sorted(_scan(text, keywords or []), key=lambda f: (f.start, -(f.end - f.start)))
+    found = _scan(text, keywords or [])
+    for sp in recognizers.recognize(text, names=names, addresses=addresses):
+        found.append(Finding(sp.type, sp.start, sp.end, sp.score, "ner"))
+    found = sorted(found, key=lambda f: (f.start, -(f.end - f.start)))
     result: list[Finding] = []
     for f in found:
         if result and f.start < result[-1].end:

@@ -23,6 +23,12 @@ def _seed(args) -> int:
     return 0
 
 
+def _bench(args) -> int:
+    from .bench import format_report, score_file
+    print(format_report(score_file(args.dataset)))
+    return 0
+
+
 def _show_config(args) -> int:
     st = Settings()
     red = st.model_dump()
@@ -48,6 +54,10 @@ def main(argv=None) -> int:
     sd = sub.add_parser("seed", help="populate synthetic demo data")
     sd.add_argument("days", nargs="?", type=int, default=14)
     sd.set_defaults(fn=_seed)
+
+    b = sub.add_parser("bench", help="score the detector against a labeled dataset")
+    b.add_argument("dataset", nargs="?", default="bench/dataset.jsonl")
+    b.set_defaults(fn=_bench)
 
     sc = sub.add_parser("show-config", help="print resolved settings (secrets redacted)")
     sc.set_defaults(fn=_show_config)

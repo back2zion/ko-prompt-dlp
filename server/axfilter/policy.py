@@ -33,8 +33,10 @@ class Policy(BaseModel):
     type_actions: dict[str, Action] = Field(default_factory=lambda: {
         "RRN": "block", "CARD": "block", "PHONE": "mask",
         "EMAIL": "mask", "BIZNO": "mask", "PASSPORT": "block",
-        "SECRET": "block", "KEYWORD": "block",
+        "SECRET": "block", "NAME": "mask", "ADDRESS": "mask", "KEYWORD": "block",
     })
+    detect_names: bool = True
+    detect_addresses: bool = True
     keywords: list[str] = Field(default_factory=list)
     groups: list[GroupDef] = Field(default_factory=list)
     time_rules: list[TimeRule] = Field(default_factory=list)
@@ -85,7 +87,7 @@ def evaluate(policy: Policy, *, service: str, ip: str, text: str,
         if rule.group == group and not _within(rule, now):
             return Decision("block", "TIME_RESTRICTED", group)
 
-    findings = detect(text, policy.keywords)
+    findings = detect(text, policy.keywords, names=policy.detect_names, addresses=policy.detect_addresses)
     actions = {f.type: policy.type_actions.get(f.type, "mask") for f in findings}
     if "block" in actions.values():
         return Decision("block", "PII_BLOCKED", group, findings)

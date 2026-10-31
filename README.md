@@ -22,7 +22,9 @@ python -m pytest                       # 41건 (SQLite 38 + 실 PostgreSQL 3; PG
 | admin | 원문 열람(감사 로그 기록), 정책 변경, 감사 로그 검증 |
 
 - 검출: 주민등록번호(날짜·체크섬), 카드번호(Luhn), 사업자번호(체크섬), 여권번호, 전화번호, 이메일,
-  자격증명/비밀키(AWS·GitHub·Slack 토큰, 개인키 블록, JWT, `password=`류 대입), 사내 키워드
+  자격증명/비밀키(AWS·GitHub·Slack 토큰, 개인키 블록, JWT, `password=`류 대입), **한국어 이름·주소(문맥·사전 기반)**, 사내 키워드
+  - 이름/주소는 신뢰도 점수를 가지며, `Policy.detect_names`/`detect_addresses`로 끌 수 있음
+  - 외부 NER 모델(트랜스포머·Presidio 등)을 `recognizers.recognize(extra=[...])`로 꽂을 수 있는 구조
 - 조치: 유형별 `allow / mask / block`, 서비스별 허용·차단, 그룹(CIDR)별 이용 시간
 - 원문은 AES-256-GCM으로 암호화 저장, 관리자 열람과 정책 변경은 해시 체인 감사 로그에 기록
 - 인증 무차별 대입 방어(IP별 실패 횟수 초과 시 잠금), 모든 응답에 보안 헤더(nosniff·DENY·no-store·CSP)
@@ -39,12 +41,26 @@ python -m pytest                       # 41건 (SQLite 38 + 실 PostgreSQL 3; PG
 - **설정**: 모든 환경변수는 `AXFILTER_` 접두사 (`axfilter/server/.env.example` 참고), pydantic-settings로 중앙 관리
 - **로깅**: 구조화 JSON 로그 + 요청 ID. 프롬프트 원문·검출값은 로그에 남기지 않음(메타데이터만)
 
+### 탐지 품질 벤치마크
+`axfilter bench`로 라벨 데이터셋(합성, `bench/dataset.jsonl`) 대비 유형별 정밀도·재현율·F1을 측정합니다.
+현재 결과(규칙·사전 기반):
+
+| 유형 | 정밀도 | 재현율 | 비고 |
+|---|---|---|---|
+| 주민·카드·이메일·전화·사업자·여권·비밀키 | 1.00 | 1.00 | 정규식 + 체크섬 |
+| 이름(NAME) | 1.00 | 0.80 | 문맥 단서(이름:/담당자/님/과장…) 필요, 맨이름은 누락 |
+| 주소(ADDRESS) | 1.00 | 0.50 | 시/군/구 없는 자유형 도로명은 누락 |
+| 전체 | 1.00 | 0.86 | F1 0.92, 오탐 0 |
+
+이름/주소의 재현율 격차는 **정밀도 우선 규칙 설계의 한계**이며, 학습된 NER 모델을 꽂으면 올라갈 지점입니다.
+`bench/make_dataset.py`가 스팬을 정확히 계산해 데이터셋을 생성하고, `tests/test_bench.py`가 품질 회귀를 막습니다.
+
 ## deploy/
 `docker-compose`로 PostgreSQL + API + nginx(TLS 종단, 대시보드 서빙) 한 묶음 실행. 기동 시 마이그레이션 자동 적용.
 자세한 내용은 `deploy/README.md`.
 
 ## 한계
-- 정규식·체크섬 기반이라 이름, 주소, 비정형 기밀은 검출하지 못함(NER/ML 미구현)
+- 이름·주소는 규칙·사전 기반이라 재현율이 제한적(NER 모델 미탑재, 다만 플러그인 구조 제공). 벤치마크 수치는 합성 데이터 기준으로 실제 분포와 다를 수 있음
 - SSO/인증 연동, 부하·고가용성 검증, 외부 보안 점검(모의해킹)은 미실시
 - KMS 공급자는 가짜 클라이언트로만 검증, 실제 AWS 계정 미검증
 - Docker 이미지·compose는 파일로 작성·검증(`docker compose config`)했으나 이 환경에선 데몬 미기동으로 컨테이너 실행은 미검증

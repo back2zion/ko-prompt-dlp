@@ -1,0 +1,123 @@
+{"text": "카드번호 4303 2179 3837 9241 등록", "spans": [{"start": 5, "end": 24, "type": "CARD"}]}
+{"text": "조금 이따 회의 시작합니다", "spans": []}
+{"text": "카드번호 4992 5375 6157 4610 등록", "spans": [{"start": 5, "end": 24, "type": "CARD"}]}
+{"text": "담당자 박하늘", "spans": [{"start": 4, "end": 7, "type": "NAME"}]}
+{"text": "작성자는 정서준", "spans": [{"start": 5, "end": 8, "type": "NAME"}]}
+{"text": "배송지는 판교로 70길 48 입니다", "spans": [{"start": 5, "end": 15, "type": "ADDRESS"}]}
+{"text": "부장님 지시사항 전달", "spans": []}
+{"text": "이수아가 보고서를 작성했습니다", "spans": [{"start": 0, "end": 3, "type": "NAME"}]}
+{"text": "사장님 일정 공유", "spans": []}
+{"text": "신청인 황서준", "spans": [{"start": 4, "end": 7, "type": "NAME"}]}
+{"text": "결제 카드 4438 3389 4547 6834 승인", "spans": [{"start": 6, "end": 25, "type": "CARD"}]}
+{"text": "담당자 이하늘 연락처 010-3077-9584", "spans": [{"start": 4, "end": 7, "type": "NAME"}, {"start": 12, "end": 25, "type": "PHONE"}]}
+{"text": "휴대폰 010-6485-9674", "spans": [{"start": 4, "end": 17, "type": "PHONE"}]}
+{"text": "배송지 부산광역시 남동구 센텀로 482", "spans": [{"start": 4, "end": 21, "type": "ADDRESS"}]}
+{"text": "신서연 팀장", "spans": [{"start": 0, "end": 3, "type": "NAME"}]}
+{"text": "설정에 password = f!dhtaxti3 가 있었음", "spans": [{"start": 4, "end": 25, "type": "SECRET"}]}
+{"text": "메일 lee88@example.com 참고", "spans": [{"start": 3, "end": 20, "type": "EMAIL"}]}
+{"text": "사업자등록번호 658-23-36567", "spans": [{"start": 8, "end": 20, "type": "BIZNO"}]}
+{"text": "여권번호 M28840361 입니다", "spans": [{"start": 5, "end": 14, "type": "PASSPORT"}]}
+{"text": "김지호한테 전달했어요", "spans": [{"start": 0, "end": 3, "type": "NAME"}]}
+{"text": "메일 park97@test.co.kr 참고", "spans": [{"start": 3, "end": 20, "type": "EMAIL"}]}
+{"text": "팀장님 회의 소집", "spans": []}
+{"text": "사업자등록번호 111-12-13185", "spans": [{"start": 8, "end": 20, "type": "BIZNO"}]}
+{"text": "회의는 3시에 시작", "spans": []}
+{"text": "황서준씨", "spans": [{"start": 0, "end": 3, "type": "NAME"}]}
+{"text": "연락 010-2495-5666 로 부탁", "spans": [{"start": 3, "end": 16, "type": "PHONE"}]}
+{"text": "이것은 테스트 문장", "spans": []}
+{"text": "결제 카드 4493 4950 0420 7583 승인", "spans": [{"start": 6, "end": 25, "type": "CARD"}]}
+{"text": "송유리 과장", "spans": [{"start": 0, "end": 3, "type": "NAME"}]}
+{"text": "정말 수고 많으셨습니다", "spans": []}
+{"text": "720419-2000028 로 가입되어 있습니다", "spans": [{"start": 0, "end": 14, "type": "RRN"}]}
+{"text": "예약자 권하늘", "spans": [{"start": 4, "end": 7, "type": "NAME"}]}
+{"text": "881002-2000024 로 가입되어 있습니다", "spans": [{"start": 0, "end": 14, "type": "RRN"}]}
+{"text": "M19967478 로 발권", "spans": [{"start": 0, "end": 9, "type": "PASSPORT"}]}
+{"text": "회신은 kim64@example.com 로", "spans": [{"start": 4, "end": 21, "type": "EMAIL"}]}
+{"text": "940728-2000073 로 가입되어 있습니다", "spans": [{"start": 0, "end": 14, "type": "RRN"}]}
+{"text": "이름: 박수아", "spans": [{"start": 4, "end": 7, "type": "NAME"}]}
+{"text": "서예준씨", "spans": [{"start": 0, "end": 3, "type": "NAME"}]}
+{"text": "배송지 경기도 분당구 대학로 379", "spans": [{"start": 4, "end": 19, "type": "ADDRESS"}]}
+{"text": "연락 010-4616-6138 로 부탁", "spans": [{"start": 3, "end": 16, "type": "PHONE"}]}
+{"text": "메일 lee36@example.com 참고", "spans": [{"start": 3, "end": 20, "type": "EMAIL"}]}
+{"text": "신청인 강서준", "spans": [{"start": 4, "end": 7, "type": "NAME"}]}
+{"text": "김예준 과장", "spans": [{"start": 0, "end": 3, "type": "NAME"}]}
+{"text": "버전 2.0 배포 완료", "spans": []}
+{"text": "최도윤님", "spans": [{"start": 0, "end": 3, "type": "NAME"}]}
+{"text": "고객 주민번호 771106-1000094 확인 바랍니다", "spans": [{"start": 8, "end": 22, "type": "RRN"}]}
+{"text": "설정에 ghp_stvvjb0u419j1jtkpxhtpjj0gxre7x97y4se 가 있었음", "spans": [{"start": 4, "end": 44, "type": "SECRET"}]}
+{"text": "대전광역시 분당구 테헤란로 41 로 방문", "spans": [{"start": 0, "end": 17, "type": "ADDRESS"}]}
+{"text": "휴대폰 010-5646-7512", "spans": [{"start": 4, "end": 17, "type": "PHONE"}]}
+{"text": "김밥 정말 맛있게 먹었다", "spans": []}
+{"text": "카드번호 4338 9960 3461 7864 등록", "spans": [{"start": 5, "end": 24, "type": "CARD"}]}
+{"text": "오지호님", "spans": [{"start": 0, "end": 3, "type": "NAME"}]}
+{"text": "대표님 승인 완료", "spans": []}
+{"text": "안민수 대리", "spans": [{"start": 0, "end": 3, "type": "NAME"}]}
+{"text": "강남 맛집 추천해줘", "spans": []}
+{"text": "배송지는 센텀로 92길 38 입니다", "spans": [{"start": 5, "end": 15, "type": "ADDRESS"}]}
+{"text": "제품 사양을 표로 정리", "spans": []}
+{"text": "키 ghp_o51zsxxzkc58nzsm2bo4w2v93e88huwaekcv 노출", "spans": [{"start": 2, "end": 42, "type": "SECRET"}]}
+{"text": "김지은한테 전달했어요", "spans": [{"start": 0, "end": 3, "type": "NAME"}]}
+{"text": "고객 주민번호 860107-1000066 확인 바랍니다", "spans": [{"start": 8, "end": 22, "type": "RRN"}]}
+{"text": "담당자 강지은 연락처 010-7102-5208", "spans": [{"start": 4, "end": 7, "type": "NAME"}, {"start": 12, "end": 25, "type": "PHONE"}]}
+{"text": "휴대폰 010-3425-4987", "spans": [{"start": 4, "end": 17, "type": "PHONE"}]}
+{"text": "윤민수 과장", "spans": [{"start": 0, "end": 3, "type": "NAME"}]}
+{"text": "박지은가 보고서를 작성했습니다", "spans": [{"start": 0, "end": 3, "type": "NAME"}]}
+{"text": "이 코드 리뷰 좀 해줘", "spans": []}
+{"text": "장수아가 보고서를 작성했습니다", "spans": [{"start": 0, "end": 3, "type": "NAME"}]}
+{"text": "여권번호 M65198940 입니다", "spans": [{"start": 5, "end": 14, "type": "PASSPORT"}]}
+{"text": "서울 날씨가 맑음", "spans": []}
+{"text": "강수확률 60% 예보", "spans": []}
+{"text": "이하늘씨", "spans": [{"start": 0, "end": 3, "type": "NAME"}]}
+{"text": "고객 주민번호 790425-2000008 확인 바랍니다", "spans": [{"start": 8, "end": 22, "type": "RRN"}]}
+{"text": "2026년 10월 매출은 12,345,678원입니다", "spans": []}
+{"text": "권예준 대리", "spans": [{"start": 0, "end": 3, "type": "NAME"}]}
+{"text": "장수아와 점심 약속", "spans": [{"start": 0, "end": 3, "type": "NAME"}]}
+{"text": "담당자 송도윤 연락처 010-6596-7350", "spans": [{"start": 4, "end": 7, "type": "NAME"}, {"start": 12, "end": 25, "type": "PHONE"}]}
+{"text": "이사님께 보고드립니다", "spans": []}
+{"text": "강유리 대리", "spans": [{"start": 0, "end": 3, "type": "NAME"}]}
+{"text": "510-07-20763 세금계산서", "spans": [{"start": 0, "end": 12, "type": "BIZNO"}]}
+{"text": "배송지는 대학로 36길 13 입니다", "spans": [{"start": 5, "end": 15, "type": "ADDRESS"}]}
+{"text": "사업자등록번호 712-34-43844", "spans": [{"start": 8, "end": 20, "type": "BIZNO"}]}
+{"text": "권서준한테 전달했어요", "spans": [{"start": 0, "end": 3, "type": "NAME"}]}
+{"text": "키 AKIAIFQPETJLEEPKO2TU 노출", "spans": [{"start": 2, "end": 22, "type": "SECRET"}]}
+{"text": "연락 010-2042-9207 로 부탁", "spans": [{"start": 3, "end": 16, "type": "PHONE"}]}
+{"text": "배송지는 테헤란로 12길 27 입니다", "spans": [{"start": 5, "end": 16, "type": "ADDRESS"}]}
+{"text": "이름: 한예준", "spans": [{"start": 4, "end": 7, "type": "NAME"}]}
+{"text": "배송지 대전광역시 분당구 판교로 352", "spans": [{"start": 4, "end": 21, "type": "ADDRESS"}]}
+{"text": "여권번호 S95954934 입니다", "spans": [{"start": 5, "end": 14, "type": "PASSPORT"}]}
+{"text": "결제 카드 4459 3997 8260 9980 승인", "spans": [{"start": 6, "end": 25, "type": "CARD"}]}
+{"text": "박스 300개 발주", "spans": []}
+{"text": "회신은 hong90@corp.local 로", "spans": [{"start": 4, "end": 21, "type": "EMAIL"}]}
+{"text": "담당자 장수아 연락처 010-9806-9529", "spans": [{"start": 4, "end": 7, "type": "NAME"}, {"start": 12, "end": 25, "type": "PHONE"}]}
+{"text": "담당자 신도윤 연락처 010-9755-1434", "spans": [{"start": 4, "end": 7, "type": "NAME"}, {"start": 12, "end": 25, "type": "PHONE"}]}
+{"text": "057-04-85610 세금계산서", "spans": [{"start": 0, "end": 12, "type": "BIZNO"}]}
+{"text": "D33320612 로 발권", "spans": [{"start": 0, "end": 9, "type": "PASSPORT"}]}
+{"text": "예약자 윤민수", "spans": [{"start": 4, "end": 7, "type": "NAME"}]}
+{"text": "담당자 황지호 연락처 010-4627-9897", "spans": [{"start": 4, "end": 7, "type": "NAME"}, {"start": 12, "end": 25, "type": "PHONE"}]}
+{"text": "오지은가 보고서를 작성했습니다", "spans": [{"start": 0, "end": 3, "type": "NAME"}]}
+{"text": "배송지는 센텀로 8길 49 입니다", "spans": [{"start": 5, "end": 14, "type": "ADDRESS"}]}
+{"text": "담당자 권지호", "spans": [{"start": 4, "end": 7, "type": "NAME"}]}
+{"text": "회신은 kim90@example.com 로", "spans": [{"start": 4, "end": 21, "type": "EMAIL"}]}
+{"text": "부산 여행 계획", "spans": []}
+{"text": "설정에 password = 9698s3r3qz 가 있었음", "spans": [{"start": 4, "end": 25, "type": "SECRET"}]}
+{"text": "예약자 박서준", "spans": [{"start": 4, "end": 7, "type": "NAME"}]}
+{"text": "과장님 확인 요망", "spans": []}
+{"text": "배송지는 대학로 15길 38 입니다", "spans": [{"start": 5, "end": 15, "type": "ADDRESS"}]}
+{"text": "신청인 정민수", "spans": [{"start": 4, "end": 7, "type": "NAME"}]}
+{"text": "O55524984 로 발권", "spans": [{"start": 0, "end": 9, "type": "PASSPORT"}]}
+{"text": "657-28-66398 세금계산서", "spans": [{"start": 0, "end": 12, "type": "BIZNO"}]}
+{"text": "인천광역시 남동구 센텀로 113 로 방문", "spans": [{"start": 0, "end": 17, "type": "ADDRESS"}]}
+{"text": "조민수와 점심 약속", "spans": [{"start": 0, "end": 3, "type": "NAME"}]}
+{"text": "키 ghp_4ouudqb0xj3pf54mhtwoc60o3qn55ms7iiux 노출", "spans": [{"start": 2, "end": 42, "type": "SECRET"}]}
+{"text": "최서연님", "spans": [{"start": 0, "end": 3, "type": "NAME"}]}
+{"text": "작성자는 강서연", "spans": [{"start": 5, "end": 8, "type": "NAME"}]}
+{"text": "작성자는 권지호", "spans": [{"start": 5, "end": 8, "type": "NAME"}]}
+{"text": "분기 실적을 요약해줘", "spans": []}
+{"text": "경기도 분당구 센텀로 394 로 방문", "spans": [{"start": 0, "end": 15, "type": "ADDRESS"}]}
+{"text": "이름: 박도윤", "spans": [{"start": 4, "end": 7, "type": "NAME"}]}
+{"text": "이지은 팀장", "spans": [{"start": 0, "end": 3, "type": "NAME"}]}
+{"text": "담당자 황지은", "spans": [{"start": 4, "end": 7, "type": "NAME"}]}
+{"text": "김하늘 팀장", "spans": [{"start": 0, "end": 3, "type": "NAME"}]}
+{"text": "성공적으로 완료되었습니다", "spans": []}
+{"text": "서울 날씨가 좋네요", "spans": []}
+{"text": "주문번호 20261028-ABX 처리 완료", "spans": []}
