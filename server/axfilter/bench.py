@@ -17,7 +17,7 @@ def _overlap(a, b) -> bool:
     return max(a[0], b[0]) < min(a[1], b[1])
 
 
-def score_file(path: str | Path, keywords: list[str] | None = None) -> dict:
+def score_file(path: str | Path, keywords: list[str] | None = None, extra=None) -> dict:
     tp = defaultdict(int); fp = defaultdict(int); fn = defaultdict(int)
     with open(path, encoding="utf-8") as f:
         for line in f:
@@ -26,7 +26,7 @@ def score_file(path: str | Path, keywords: list[str] | None = None) -> dict:
                 continue
             row = json.loads(line)
             gold = [(s["start"], s["end"], s["type"]) for s in row["spans"]]
-            preds = [(x.start, x.end, x.type) for x in detect(row["text"], keywords or [])]
+            preds = [(x.start, x.end, x.type) for x in detect(row["text"], keywords or [], extra=extra)]
             used = set()
             for p in preds:
                 hit = next((i for i, g in enumerate(gold)

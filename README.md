@@ -24,7 +24,10 @@ python -m pytest                       # 41건 (SQLite 38 + 실 PostgreSQL 3; PG
 - 검출: 주민등록번호(날짜·체크섬), 카드번호(Luhn), 사업자번호(체크섬), 여권번호, 전화번호, 이메일,
   자격증명/비밀키(AWS·GitHub·Slack 토큰, 개인키 블록, JWT, `password=`류 대입), **한국어 이름·주소(문맥·사전 기반)**, 사내 키워드
   - 이름/주소는 신뢰도 점수를 가지며, `Policy.detect_names`/`detect_addresses`로 끌 수 있음
-  - 외부 NER 모델(트랜스포머·Presidio 등)을 `recognizers.recognize(extra=[...])`로 꽂을 수 있는 구조
+  - 외부 NER 모델을 `detect(text, extra=[...])` / `recognizers.recognize(extra=[...])`로 꽂는 구조
+  - **트랜스포머 NER 어댑터**(`ner_models.TransformerNerRecognizer`): HF 토큰분류 파이프라인의 라벨(PS/PER→이름, LC/LOC→주소)을 매핑.
+    `pip install "axfilter[ner]"` 후 `axfilter bench --ner-model <모델명>`으로 모델 포함 성능 측정.
+    *단, 모델 가중치 다운로드가 필요해 모델 접근이 가능한 환경에서 실행해야 함. 본 저장소에서는 어댑터·라벨매핑·병합 로직만 스텁 파이프라인으로 단위 검증(실모델 미구동).*
 - 조치: 유형별 `allow / mask / block`, 서비스별 허용·차단, 그룹(CIDR)별 이용 시간
 - 원문은 AES-256-GCM으로 암호화 저장, 관리자 열람과 정책 변경은 해시 체인 감사 로그에 기록
 - 인증 무차별 대입 방어(IP별 실패 횟수 초과 시 잠금), 모든 응답에 보안 헤더(nosniff·DENY·no-store·CSP)

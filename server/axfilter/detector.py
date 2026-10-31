@@ -148,10 +148,13 @@ def _scan(text: str, keywords: list[str]) -> list[Finding]:
 
 
 def detect(text: str, keywords: list[str] | None = None, *,
-           names: bool = True, addresses: bool = True) -> list[Finding]:
-    """Return non-overlapping findings ordered by position (longest wins)."""
+           names: bool = True, addresses: bool = True, extra=None) -> list[Finding]:
+    """Return non-overlapping findings ordered by position (longest wins).
+
+    ``extra`` is an optional list of recognizer callables (e.g. a transformer NER
+    adapter) that each return recognizers.Span tuples."""
     found = _scan(text, keywords or [])
-    for sp in recognizers.recognize(text, names=names, addresses=addresses):
+    for sp in recognizers.recognize(text, names=names, addresses=addresses, extra=extra):
         found.append(Finding(sp.type, sp.start, sp.end, sp.score, "ner"))
     found = sorted(found, key=lambda f: (f.start, -(f.end - f.start)))
     result: list[Finding] = []

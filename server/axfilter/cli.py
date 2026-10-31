@@ -25,7 +25,12 @@ def _seed(args) -> int:
 
 def _bench(args) -> int:
     from .bench import format_report, score_file
-    print(format_report(score_file(args.dataset)))
+    extra = None
+    if args.ner_model:
+        from .ner_models import TransformerNerRecognizer
+        extra = [TransformerNerRecognizer(args.ner_model, threshold=args.ner_threshold)]
+        print(f"[bench] using NER model: {args.ner_model} (threshold {args.ner_threshold})")
+    print(format_report(score_file(args.dataset, extra=extra)))
     return 0
 
 
@@ -73,6 +78,8 @@ def main(argv=None) -> int:
 
     b = sub.add_parser("bench", help="score the detector against a labeled dataset")
     b.add_argument("dataset", nargs="?", default="bench/dataset.jsonl")
+    b.add_argument("--ner-model", default="", help="HF token-classification model to add (needs axfilter[ner])")
+    b.add_argument("--ner-threshold", type=float, default=0.5)
     b.set_defaults(fn=_bench)
 
     r = sub.add_parser("report", help="generate a compliance evidence report")
