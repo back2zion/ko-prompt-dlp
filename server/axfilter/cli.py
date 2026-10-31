@@ -29,6 +29,22 @@ def _bench(args) -> int:
     return 0
 
 
+def _report(args) -> int:
+    import json as _json
+    from . import compliance
+    from .app import config_from_env
+    from .keys import LocalMasterKeyProvider
+    from .store import Store
+    cfg = config_from_env()
+    store = Store(cfg.db_path, cfg.key_provider or LocalMasterKeyProvider(cfg.data_key))
+    days = {"today": 1, "week": 7, "month": 30, "quarter": 90}.get(args.period, 30)
+    rep = compliance.build_report(
+        store, {"key_provider": store.key_provider_name, "tls_required": cfg.require_tls},
+        period_days=days, framework=args.framework, sign_key=cfg.data_key)
+    print(compliance.to_csv(rep) if args.csv else _json.dumps(rep, ensure_ascii=False, indent=2))
+    return 0
+
+
 def _show_config(args) -> int:
     st = Settings()
     red = st.model_dump()
@@ -58,6 +74,12 @@ def main(argv=None) -> int:
     b = sub.add_parser("bench", help="score the detector against a labeled dataset")
     b.add_argument("dataset", nargs="?", default="bench/dataset.jsonl")
     b.set_defaults(fn=_bench)
+
+    r = sub.add_parser("report", help="generate a compliance evidence report")
+    r.add_argument("--period", default="month", choices=["today", "week", "month", "quarter"])
+    r.add_argument("--framework", default=None, help="ISMS-P | 'ISO 27001' (default: all)")
+    r.add_argument("--csv", action="store_true")
+    r.set_defaults(fn=_report)
 
     sc = sub.add_parser("show-config", help="print resolved settings (secrets redacted)")
     sc.set_defaults(fn=_show_config)

@@ -87,3 +87,16 @@ def test_api_end_to_end_on_postgres():
     assert s["total"] == 2 and s["blocked"] == 1 and s["masked"] == 1
     o = c.get("/v1/events/1/original", headers=h("admin")).json()
     assert o["original"] == "mail a@b.com"
+
+
+def test_policy_history_and_audit_search_on_postgres():
+    from axfilter.policy import Policy
+    s = _fresh_store()
+    s.set_policy(Policy(), actor="admin")
+    s.set_policy(Policy(block_message="changed"), actor="admin2")
+    hist = s.policy_history()
+    assert len(hist) == 2 and hist[0]["actor"] == "admin2"
+    s.audit("admin", "VIEW_ORIGINAL", "event:1")
+    s.audit("admin", "UPDATE_POLICY", "policy")
+    got = s.audit_search(action="VIEW_ORIGINAL")
+    assert len(got) == 1 and got[0]["actor"] == "admin"

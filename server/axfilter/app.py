@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 import logging
 
 from .keys import KeyProvider, LocalMasterKeyProvider, provider_from_env
+from . import compliance
 from .logging_setup import log_event, new_request_id, request_id, setup_logging
 from .policy import Policy, evaluate
 from .settings import Settings
@@ -208,7 +209,7 @@ def create_app(cfg: Config) -> FastAPI:
 
     @app.put("/v1/policy")
     def put_policy(policy: Policy, role: str = Depends(require("admin"))):
-        store.set_policy(policy)
+        store.set_policy(policy, actor=role)
         store.audit(role, "UPDATE_POLICY", "policy")
         return policy
 
@@ -221,6 +222,51 @@ def create_app(cfg: Config) -> FastAPI:
     @app.get("/v1/audit")
     def audit(_: str = Depends(require("admin"))):
         return {"verify": store.verify_audit(), "entries": store.audit_entries()}
+
+    @app.get("/v1/audit/search")
+    def audit_search(actor: str | None = None,
+                     action: str | None = None,
+                     period: str | None = None,
+                     limit: int = Query(100, ge=1, le=1000), offset: int = Query(0, ge=0),
+                     _: str = Depends(require("admin"))):
+        kw = {"actor": actor, "action": action, "limit": limit, "offset": offset}
+        if period:
+            kw["since"] = since(period)
+        return store.audit_search(**kw)
+
+    @app.get("/v1/policy/history")
+    def policy_history(limit: int = Query(100, ge=1, le=1000), _: str = Depends(require("admin"))):
+        return store.policy_history(limit)
+
+    @app.get("/v1/policy/history/{version_id}")
+    def policy_version(version_id: int, _: str = Depends(require("admin"))):
+        v = store.policy_version(version_id)
+        if v is None:
+            raise HTTPException(404, "version not found")
+        return v
+
+    def _report(period: str, framework: str | None):
+        return compliance.build_report(
+            store, {"key_provider": store.key_provider_name, "tls_required": cfg.require_tls},
+            period_days=PERIOD_DAYS.get(period, 30), framework=framework, sign_key=cfg.data_key)
+
+    @app.get("/v1/compliance/report")
+    def compliance_report(period: str = "month", framework: str | None = None,
+                          role: str = Depends(require("admin"))):
+        store.audit(role, "EXPORT_COMPLIANCE_REPORT", f"framework={framework or 'all'};period={period}")
+        return _report(period, framework)
+
+    @app.get("/v1/compliance/report.csv")
+    def compliance_report_csv(period: str = "month", framework: str | None = None,
+                              role: str = Depends(require("admin"))):
+        store.audit(role, "EXPORT_COMPLIANCE_REPORT", f"csv;framework={framework or 'all'};period={period}")
+        csv_text = compliance.to_csv(_report(period, framework))
+        return Response(csv_text, media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": "attachment; filename=axfilter-compliance.csv"})
+
+    @app.post("/v1/compliance/verify")
+    def compliance_verify(report: dict, _: str = Depends(require("admin"))):
+        return {"valid": compliance.verify(report, cfg.data_key)}
 
     @app.get("/healthz")
     def healthz():

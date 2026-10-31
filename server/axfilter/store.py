@@ -48,6 +48,15 @@ kv = Table("kv", metadata,
            Column("k", String(64), primary_key=True),
            Column("v", Text, nullable=False))
 
+policy_history = Table(
+    "policy_history", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("ts", BigInteger, nullable=False),
+    Column("actor", Text, nullable=False),
+    Column("policy_json", Text, nullable=False),
+    Column("hash", Text, nullable=False),
+)
+
 audit = Table(
     "audit", metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
@@ -176,9 +185,26 @@ class Store:
             v = self._kv_get(conn, "policy")
         return Policy.model_validate_json(v) if v else Policy()
 
-    def set_policy(self, policy: Policy) -> None:
+    def set_policy(self, policy: Policy, actor: str = "system") -> None:
+        pj = policy.model_dump_json()
+        digest = hashlib.sha256(pj.encode()).hexdigest()
         with self._lock, self._engine.begin() as conn:
-            self._kv_set(conn, "policy", policy.model_dump_json())
+            self._kv_set(conn, "policy", pj)
+            conn.execute(policy_history.insert().values(
+                ts=int(time.time()), actor=actor, policy_json=pj, hash=digest))
+
+    def policy_history(self, limit: int = 100) -> list[dict]:
+        with self._engine.connect() as conn:
+            rows = conn.execute(select(
+                policy_history.c.id, policy_history.c.ts, policy_history.c.actor,
+                policy_history.c.hash).order_by(policy_history.c.id.desc()).limit(limit)).mappings().all()
+        return [dict(r) for r in rows]
+
+    def policy_version(self, version_id: int) -> dict | None:
+        with self._engine.connect() as conn:
+            r = conn.execute(select(policy_history).where(
+                policy_history.c.id == version_id)).mappings().first()
+        return dict(r) if r else None
 
     # ---- events -------------------------------------------------------
     def add_event(self, *, service, user, ip, group, direction, action, reason,
@@ -258,9 +284,23 @@ class Store:
                                                prev_hash=prev, hash=digest))
 
     def audit_entries(self, limit: int = 100) -> list[dict]:
+        return self.audit_search(limit=limit)
+
+    def audit_search(self, *, actor: str | None = None, action: str | None = None,
+                     since: int | None = None, until: int | None = None,
+                     limit: int = 100, offset: int = 0) -> list[dict]:
+        q = select(audit)
+        if actor:
+            q = q.where(audit.c.actor == actor)
+        if action:
+            q = q.where(audit.c.action == action)
+        if since is not None:
+            q = q.where(audit.c.ts >= since)
+        if until is not None:
+            q = q.where(audit.c.ts < until)
+        q = q.order_by(audit.c.id.desc()).limit(limit).offset(offset)
         with self._engine.connect() as conn:
-            rows = conn.execute(select(audit).order_by(audit.c.id.desc()).limit(limit)).mappings().all()
-        return [dict(r) for r in rows]
+            return [dict(r) for r in conn.execute(q).mappings().all()]
 
     def verify_audit(self) -> dict:
         prev = GENESIS

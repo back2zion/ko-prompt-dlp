@@ -19,7 +19,7 @@ python -m pytest                       # 41건 (SQLite 38 + 실 PostgreSQL 3; PG
 |---|---|
 | agent | `POST /v1/inspect` (프롬프트 검사) |
 | viewer | 통계·이력·정책 조회 (원문 불가) |
-| admin | 원문 열람(감사 로그 기록), 정책 변경, 감사 로그 검증 |
+| admin | 원문 열람(감사 로그 기록), 정책 변경, 감사 로그 검증·검색, 정책 변경 이력, **컴플라이언스 증적 리포트** |
 
 - 검출: 주민등록번호(날짜·체크섬), 카드번호(Luhn), 사업자번호(체크섬), 여권번호, 전화번호, 이메일,
   자격증명/비밀키(AWS·GitHub·Slack 토큰, 개인키 블록, JWT, `password=`류 대입), **한국어 이름·주소(문맥·사전 기반)**, 사내 키워드
@@ -40,6 +40,16 @@ python -m pytest                       # 41건 (SQLite 38 + 실 PostgreSQL 3; PG
   - 마이그레이션: `alembic upgrade head` (SQLite·PostgreSQL 모두 검증)
 - **설정**: 모든 환경변수는 `AXFILTER_` 접두사 (`axfilter/server/.env.example` 참고), pydantic-settings로 중앙 관리
 - **로깅**: 구조화 JSON 로그 + 요청 ID. 프롬프트 원문·검출값은 로그에 남기지 않음(메타데이터만)
+
+### 컴플라이언스 증적
+ISMS-P / ISO 27001 심사 대응용 증적 자료를 생성합니다(인증 보장이 아닌 **증적 자료**이며 통제 매핑은 참고용).
+- `GET /v1/compliance/report?period=&framework=` — 서명(HMAC-SHA256)된 JSON 리포트
+- `GET /v1/compliance/report.csv` — 통제 매핑 CSV / `POST /v1/compliance/verify` — 서명 검증
+- `GET /v1/policy/history` — 정책 변경 이력(버전·변경자·해시) / `GET /v1/audit/search` — 감사로그 검색(행위자·행위·기간)
+- CLI: `axfilter report --framework ISMS-P --csv`
+- 증적 내용: RBAC·원문열람 이력, 저장 암호화·키공급자, 감사 해시체인 검증 결과, 전송구간 TLS,
+  마스킹·차단 통계, 정책 변경 이력 → ISMS-P 2.5/2.7/2.9.4/2.10/3.2/1.2, ISO A.8.24/A.8.15/A.5.15/A.8.11에 매핑
+- 리포트 생성 자체도 감사로그(`EXPORT_COMPLIANCE_REPORT`)에 기록
 
 ### 탐지 품질 벤치마크
 `axfilter bench`로 라벨 데이터셋(합성, `bench/dataset.jsonl`) 대비 유형별 정밀도·재현율·F1을 측정합니다.
