@@ -102,6 +102,42 @@
   .two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
   .tcap { font-size: 12px; color: var(--muted); margin: 0 0 8px; font-weight: 600; letter-spacing: .02em; }
   .scroll { overflow-x: auto; }
+
+  /* clickable drill-down rows */
+  tr.clk { cursor: pointer; }
+  tr.clk:hover td, tr.clk:focus-visible td { background: var(--surface-2); }
+  tr.clk:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+  /* 검출 유형별 ranked bar list */
+  .types { list-style: none; margin: 0; padding: 0; display: grid; gap: 9px; }
+  .types li { display: grid; grid-template-columns: 112px 1fr auto; align-items: center; gap: 10px; }
+  .types .tname { color: var(--ink-soft); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .types .track { background: var(--surface-2); border-radius: 5px; height: 10px; overflow: hidden; }
+  .types .fill { background: var(--detect); height: 100%; border-radius: 5px; min-width: 2px; }
+  .types .tval { font-size: 12.5px; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .types .tval .pct { color: var(--muted); margin-left: 6px; font-size: 11.5px; }
+  .empty { color: var(--muted); font-size: 12.5px; padding: 6px 0; }
+
+  /* action pill */
+  .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600;
+    border: 1px solid transparent; line-height: 1.5; }
+  .pill.allow { color: var(--allow); background: color-mix(in srgb, var(--allow) 14%, transparent); border-color: color-mix(in srgb, var(--allow) 34%, transparent); }
+  .pill.mask { color: var(--mask); background: color-mix(in srgb, var(--mask) 16%, transparent); border-color: color-mix(in srgb, var(--mask) 38%, transparent); }
+  .pill.block { color: var(--block); background: color-mix(in srgb, var(--block) 14%, transparent); border-color: color-mix(in srgb, var(--block) 36%, transparent); }
+  .tag { display: inline-block; padding: 1px 7px; margin: 1px 3px 1px 0; border-radius: 6px; font-size: 11px;
+    background: var(--accent-soft); color: var(--accent); white-space: nowrap; }
+
+  /* recent-events controls + pagination */
+  .evbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-soft);
+    background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px; padding: 3px 6px 3px 11px; }
+  .chip button { border: 0; background: transparent; color: var(--muted); font-size: 14px; line-height: 1;
+    cursor: pointer; padding: 0 3px; border-radius: 50%; }
+  .chip button:hover { color: var(--block); }
+  .pager { display: flex; align-items: center; gap: 10px; justify-content: flex-end; margin-top: 12px;
+    font-size: 12px; color: var(--muted); }
+  .pager button[disabled] { opacity: .45; cursor: default; }
+  .pager button[disabled]:hover { border-color: var(--line); }
   footer { color: var(--muted); font-size: 11.5px; margin-top: 10px; text-align: center; }
   dialog { border: 1px solid var(--line); border-radius: 14px; background: var(--surface);
     color: var(--ink); max-width: 420px; width: calc(100% - 32px); box-shadow: var(--shadow); padding: 20px; }
@@ -171,7 +207,7 @@
   </section>
 
   <section class="panel">
-    <h2>AI 서비스별 현황</h2>
+    <h2>AI 서비스별 현황 <span class="hint">행을 클릭하면 최근 이벤트가 필터링됩니다</span></h2>
     <div class="scroll">
       <table id="svcTable"><thead><tr>
         <th>AI 서비스</th><th>총 처리</th><th>검출</th><th>허용</th><th>차단</th><th>마스킹</th><th>평균 처리 속도</th>
@@ -180,7 +216,12 @@
   </section>
 
   <section class="panel">
-    <h2>사용량 Top 5</h2>
+    <h2>검출 유형별 <span class="hint">현재 조회 기준 개인정보 유형 분포</span></h2>
+    <ul class="types" id="typeList" aria-label="검출 유형별 분포"></ul>
+  </section>
+
+  <section class="panel">
+    <h2>사용량 Top 5 <span class="hint">행을 클릭하면 최근 이벤트가 필터링됩니다</span></h2>
     <div class="two">
       <div>
         <p class="tcap">그룹별</p>
@@ -194,6 +235,29 @@
           <th>순위</th><th>IP</th><th>그룹</th><th>총 처리</th><th>검출</th><th>차단</th>
         </tr></thead><tbody></tbody></table></div>
       </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>최근 이벤트 <span class="hint">개인정보가 검출·처리된 최근 요청 내역</span></h2>
+    <div class="evbar">
+      <div class="segment" id="evActionSeg" role="group" aria-label="처리 유형 필터">
+        <button data-act="" aria-pressed="true">전체</button>
+        <button data-act="allow">허용</button>
+        <button data-act="mask">마스킹</button>
+        <button data-act="block">차단</button>
+      </div>
+      <span class="chip" id="evFilterChip" hidden></span>
+    </div>
+    <div class="scroll">
+      <table id="evTable"><thead><tr>
+        <th>시간</th><th>서비스</th><th>부서/그룹</th><th>처리</th><th>검출 유형</th><th>사유</th>
+      </tr></thead><tbody></tbody></table>
+    </div>
+    <div class="pager">
+      <span id="evRange"></span>
+      <button class="btn" id="evPrev" type="button">이전</button>
+      <button class="btn" id="evNext" type="button">다음</button>
     </div>
   </section>
 
@@ -221,10 +285,16 @@
   "use strict";
   var LS = "axfilter.dashboard.conn";
   var state = { period: "week", dir: "all", conn: null };
+  // recent-events drill-down state (table pagination + active row filter)
+  var ev = { action: "", offset: 0, limit: 10, filter: {}, cache: [] };
   var PERIOD_LABEL = { today: "오늘", week: "최근 7일", month: "최근 30일", quarter: "최근 90일" };
   var fmt = function (n) { return (n == null ? 0 : n).toLocaleString("ko-KR"); };
   var SVC_NAME = { chatgpt: "ChatGPT", claude: "Claude", gemini: "Gemini",
     copilot: "Copilot", perplexity: "Perplexity" };
+  var TYPE_LABEL = { RRN: "주민등록번호", CARD: "신용카드번호", PHONE: "전화번호", EMAIL: "이메일",
+    BIZNO: "사업자등록번호", PASSPORT: "여권번호", SECRET: "자격증명/비밀키", NAME: "이름",
+    ADDRESS: "주소", KEYWORD: "사내 키워드" };
+  var ACTION_LABEL = { allow: "허용", mask: "마스킹", block: "차단" };
 
   try { state.conn = JSON.parse(localStorage.getItem(LS) || "null"); } catch (e) { state.conn = null; }
 
@@ -335,7 +405,7 @@
     var rows = svcs.map(function (s) {
       var lat = Math.round(s.avg_latency_ms || 0);
       var w = Math.max(6, Math.round(70 * lat / maxLat));
-      return "<tr><td>" + (SVC_NAME[s.service] || s.service) + "</td><td>" + fmt(s.total) +
+      return '<tr class="clk" tabindex="0" data-svc="' + s.service + '"><td>' + (SVC_NAME[s.service] || s.service) + "</td><td>" + fmt(s.total) +
         '</td><td class="num detect">' + fmt(s.detected) + '</td><td class="num allow">' + fmt(s.allowed) +
         '</td><td class="num block">' + fmt(s.blocked) + '</td><td class="num mask">' + fmt(s.masked) +
         '</td><td><span class="bar" style="width:' + w + 'px"></span>' + fmt(lat) + "ms</td></tr>";
@@ -347,11 +417,110 @@
     var html = rows.map(function (r, i) {
       var label = kind === "group" ? r.grp : r.ip;
       var second = kind === "group" ? fmt(r.users) + "명" : (r.grp || "");
-      return '<tr><td class="rank">' + (i + 1) + "</td><td>" + label + "</td><td>" + second +
+      var attr = kind === "group" ? ' data-grp="' + (r.grp || "") + '"'
+        : ' data-ip="' + r.ip + '" data-grp="' + (r.grp || "") + '"';
+      return '<tr class="clk" tabindex="0"' + attr + '><td class="rank">' + (i + 1) + "</td><td>" + label + "</td><td>" + second +
         "</td><td>" + fmt(r.total) + '</td><td class="num detect">' + fmt(r.detected) +
         '</td><td class="num block">' + fmt(r.blocked) + "</td></tr>";
     }).join("");
     qs(tbl).querySelector("tbody").innerHTML = html;
+  }
+
+  // ---- drill-down: 검출 유형별 + 최근 이벤트 ----------------------------
+  async function loadEvents() {
+    var c = state.conn;
+    if (!c || !c.base) { ev.cache = (window.AXFILTER_DEMO_EVENTS || []).slice(); return; }
+    var base = c.base.replace(/\/$/, "");
+    var r = await fetch(base + "/v1/events?limit=200", { headers: { "X-API-Key": c.key } });
+    if (!r.ok) throw new Error("events → HTTP " + r.status);
+    var data = await r.json();
+    ev.cache = Array.isArray(data) ? data : [];
+  }
+
+  function renderTypes() {
+    var rows;
+    if (state.conn && state.conn.base) {
+      // live: aggregate finding types across the recent-events sample
+      var counts = {};
+      ev.cache.forEach(function (e) {
+        (e.finding_types || []).forEach(function (tp) { counts[tp] = (counts[tp] || 0) + 1; });
+      });
+      rows = Object.keys(counts).map(function (k) { return { type: k, count: counts[k] }; })
+        .sort(function (a, b) { return b.count - a.count; });
+    } else {
+      rows = ((window.AXFILTER_DEMO_TYPES || {})[state.period] || {})[state.dir] || [];
+    }
+    var el = qs("typeList");
+    if (!rows.length) { el.innerHTML = '<li class="empty">검출된 개인정보 유형이 없습니다.</li>'; return; }
+    var max = rows[0].count || 1;
+    var tot = rows.reduce(function (s, r) { return s + r.count; }, 0) || 1;
+    el.innerHTML = rows.map(function (r) {
+      var w = Math.max(2, Math.round(100 * r.count / max));
+      var pct = (100 * r.count / tot).toFixed(1);
+      return '<li><span class="tname" title="' + (TYPE_LABEL[r.type] || r.type) + '">' +
+        (TYPE_LABEL[r.type] || r.type) + '</span><span class="track"><span class="fill" style="width:' +
+        w + '%"></span></span><span class="tval">' + fmt(r.count) +
+        '<span class="pct">' + pct + '%</span></span></li>';
+    }).join("");
+  }
+
+  function fmtTs(ts) {
+    var ms = ts < 1e12 ? ts * 1000 : ts;
+    var d = new Date(ms);
+    if (isNaN(d.getTime())) return String(ts);
+    return d.toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+  }
+
+  function filteredEvents() {
+    var f = ev.filter;
+    return ev.cache.filter(function (e) {
+      if (ev.action && e.action !== ev.action) return false;
+      if (f.service && e.service !== f.service) return false;
+      if (f.ip && e.ip !== f.ip) return false;
+      if (f.grp && e.grp !== f.grp) return false;
+      return true;
+    });
+  }
+
+  function clearEvFilter() { ev.filter = {}; ev.offset = 0; renderEvents(); }
+
+  function setEvFilter(f) {
+    ev.filter = f; ev.offset = 0; renderEvents();
+    var panel = qs("evTable").closest(".panel");
+    if (panel && panel.scrollIntoView) panel.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function renderEvents() {
+    var list = filteredEvents();
+    var total = list.length;
+    if (ev.offset >= total) ev.offset = Math.max(0, (Math.ceil(total / ev.limit) - 1) * ev.limit);
+    var page = list.slice(ev.offset, ev.offset + ev.limit);
+    var tb = qs("evTable").querySelector("tbody");
+    if (!page.length) {
+      tb.innerHTML = '<tr><td colspan="6" class="empty">표시할 이벤트가 없습니다.</td></tr>';
+    } else {
+      tb.innerHTML = page.map(function (e) {
+        var tags = (e.finding_types || []).map(function (tp) {
+          return '<span class="tag">' + (TYPE_LABEL[tp] || tp) + '</span>';
+        }).join("") || '<span style="color:var(--muted)">-</span>';
+        return "<tr><td>" + fmtTs(e.ts) + "</td><td>" + (SVC_NAME[e.service] || e.service) +
+          "</td><td>" + (e.grp || "-") + '</td><td><span class="pill ' + e.action + '">' +
+          (ACTION_LABEL[e.action] || e.action) + '</span></td><td style="white-space:normal">' + tags +
+          "</td><td>" + (e.reason || "-") + "</td></tr>";
+      }).join("");
+    }
+    var from = total ? ev.offset + 1 : 0, to = Math.min(ev.offset + ev.limit, total);
+    qs("evRange").textContent = total ? (from + "–" + to + " / " + fmt(total) + "건") : "0건";
+    qs("evPrev").disabled = ev.offset <= 0;
+    qs("evNext").disabled = ev.offset + ev.limit >= total;
+    var chip = qs("evFilterChip"), f = ev.filter;
+    var label = f.service ? ("서비스: " + (SVC_NAME[f.service] || f.service))
+      : f.ip ? ("IP: " + f.ip) : f.grp ? ("그룹: " + f.grp) : "";
+    if (label) {
+      chip.hidden = false;
+      chip.innerHTML = label + ' <button type="button" id="evClear" aria-label="필터 해제">×</button>';
+      qs("evClear").addEventListener("click", clearEvFilter);
+    } else { chip.hidden = true; chip.innerHTML = ""; }
   }
 
   async function render() {
@@ -370,6 +539,10 @@
     renderServices(view.services);
     renderTop("grpTable", view.top_group, "group");
     renderTop("ipTable", view.top_ip, "ip");
+    try { await loadEvents(); }
+    catch (e) { ev.cache = (window.AXFILTER_DEMO_EVENTS || []).slice(); }
+    renderTypes();
+    renderEvents();
   }
 
   function reflectConn() {
@@ -389,6 +562,34 @@
   qs("dirSeg").addEventListener("click", function (e) {
     var b = e.target.closest("button"); if (!b) return;
     state.dir = b.dataset.dir; setPressed(qs("dirSeg"), "dir", state.dir); render();
+  });
+  qs("evActionSeg").addEventListener("click", function (e) {
+    var b = e.target.closest("button"); if (!b) return;
+    ev.action = b.dataset.act; ev.offset = 0;
+    setPressed(qs("evActionSeg"), "act", ev.action);
+    renderEvents();
+  });
+  qs("evPrev").addEventListener("click", function () {
+    ev.offset = Math.max(0, ev.offset - ev.limit); renderEvents();
+  });
+  qs("evNext").addEventListener("click", function () {
+    ev.offset = ev.offset + ev.limit; renderEvents();
+  });
+  function rowFilter(tr) {
+    if (tr.dataset.svc) setEvFilter({ service: tr.dataset.svc });
+    else if (tr.dataset.ip) setEvFilter({ ip: tr.dataset.ip, grp: tr.dataset.grp || undefined });
+    else if (tr.dataset.grp) setEvFilter({ grp: tr.dataset.grp });
+  }
+  ["svcTable", "grpTable", "ipTable"].forEach(function (id) {
+    var tbl = qs(id);
+    tbl.addEventListener("click", function (e) {
+      var tr = e.target.closest("tr.clk"); if (tr) rowFilter(tr);
+    });
+    tbl.addEventListener("keydown", function (e) {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      var tr = e.target.closest("tr.clk"); if (!tr) return;
+      e.preventDefault(); rowFilter(tr);
+    });
   });
   qs("cfgBtn").addEventListener("click", function () {
     if (state.conn) { qs("apiBase").value = state.conn.base || ""; qs("apiKey").value = state.conn.key || ""; }
