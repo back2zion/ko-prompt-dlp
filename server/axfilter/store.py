@@ -1,43 +1,68 @@
-"""SQLite storage: events (original text encrypted), policy, hash-chained audit log."""
+"""Backend-agnostic storage (SQLite or PostgreSQL) via SQLAlchemy Core.
+
+Holds events (original prompt text encrypted at rest), the policy, the wrapped
+data key, and a hash-chained audit log. Column names and the public API are the
+same across backends so the rest of the app does not care which is in use.
+"""
 from __future__ import annotations
 
 import hashlib
 import json
 import os
-import sqlite3
 import threading
 import time
 from pathlib import Path
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from sqlalchemy import (BigInteger, Column, Float, Index, Integer, LargeBinary,
+                        MetaData, String, Table, Text, case, create_engine,
+                        distinct, func, select)
 
 from .keys import KeyProvider
 from .policy import Policy
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS events (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  ts INTEGER NOT NULL,
-  service TEXT NOT NULL, user TEXT NOT NULL, ip TEXT NOT NULL, grp TEXT NOT NULL,
-  direction TEXT NOT NULL, action TEXT NOT NULL, reason TEXT,
-  finding_types TEXT NOT NULL, finding_count INTEGER NOT NULL,
-  latency_ms REAL NOT NULL,
-  masked_text TEXT, nonce BLOB, original_enc BLOB
-);
-CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
-CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS audit (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  ts INTEGER NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL, target TEXT NOT NULL,
-  prev_hash TEXT NOT NULL, hash TEXT NOT NULL
-);
-"""
 GENESIS = "0" * 64
+metadata = MetaData()
+
+events = Table(
+    "events", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("ts", BigInteger, nullable=False),
+    Column("service", Text, nullable=False),
+    Column("user", Text, nullable=False),      # SQLAlchemy quotes this reserved word per dialect
+    Column("ip", Text, nullable=False),
+    Column("grp", Text, nullable=False),
+    Column("direction", Text, nullable=False),
+    Column("action", Text, nullable=False),
+    Column("reason", Text),
+    Column("finding_types", Text, nullable=False),
+    Column("finding_count", Integer, nullable=False),
+    Column("latency_ms", Float, nullable=False),
+    Column("masked_text", Text),
+    Column("nonce", LargeBinary),
+    Column("original_enc", LargeBinary),
+)
+Index("idx_events_ts", events.c.ts)
+
+kv = Table("kv", metadata,
+           Column("k", String(64), primary_key=True),
+           Column("v", Text, nullable=False))
+
+audit = Table(
+    "audit", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("ts", BigInteger, nullable=False),
+    Column("actor", Text, nullable=False),
+    Column("action", Text, nullable=False),
+    Column("target", Text, nullable=False),
+    Column("prev_hash", Text, nullable=False),
+    Column("hash", Text, nullable=False),
+)
 
 
-def _clean(row: sqlite3.Row) -> dict:
-    """Row to dict, with NULL aggregates (SUM over no rows) turned into 0."""
-    return {k: 0 if row[k] is None else row[k] for k in row.keys()}
+def _clean(mapping) -> dict:
+    """RowMapping to dict, with NULL aggregates (SUM/AVG over no rows) turned into 0."""
+    return {k: (0 if v is None else v) for k, v in mapping.items()}
 
 
 def load_or_create_key(path: Path) -> bytes:
@@ -58,44 +83,86 @@ def load_or_create_key(path: Path) -> bytes:
     return key
 
 
+def _to_url(db_path_or_url: str | Path) -> str:
+    s = str(db_path_or_url)
+    return s if "://" in s else "sqlite:///" + s
+
+
 class Store:
-    def __init__(self, db_path: str | Path, provider: KeyProvider):
+    def __init__(self, db_path_or_url: str | Path, provider: KeyProvider):
         self._provider = provider
         self._lock = threading.Lock()
-        self._db = sqlite3.connect(str(db_path), check_same_thread=False)
-        self._db.row_factory = sqlite3.Row
-        self._db.executescript(SCHEMA)
+        url = _to_url(db_path_or_url)
+        kwargs = {"future": True}
+        if url.startswith("sqlite"):
+            kwargs["connect_args"] = {"check_same_thread": False}
+        self._engine = create_engine(url, **kwargs)
+        self._dialect = self._engine.dialect.name
+        metadata.create_all(self._engine)
         self._aes = AESGCM(self._load_or_create_dek())
 
-    # ---- data encryption key (envelope) ---------------------------------
+    # ---- small helpers ------------------------------------------------
+    def _kv_set(self, conn, k: str, v: str) -> None:
+        r = conn.execute(kv.update().where(kv.c.k == k).values(v=v))
+        if r.rowcount == 0:
+            conn.execute(kv.insert().values(k=k, v=v))
+
+    def _kv_get(self, conn, k: str):
+        return conn.execute(select(kv.c.v).where(kv.c.k == k)).scalar_one_or_none()
+
+    _AGG = None
+
+    def _agg(self):
+        return [
+            func.count().label("total"),
+            func.sum(case((events.c.finding_count > 0, 1), else_=0)).label("detected"),
+            func.sum(case((events.c.action.in_(["allow", "mask"]), 1), else_=0)).label("allowed"),
+            func.sum(case((events.c.action == "block", 1), else_=0)).label("blocked"),
+            func.sum(case((events.c.action == "mask", 1), else_=0)).label("masked"),
+        ]
+
+    def _where(self, since: int, direction: str):
+        cond = events.c.ts >= since
+        if direction != "all":
+            cond = cond & (events.c.direction == direction)
+        return cond
+
+    def _day_expr(self):
+        if self._dialect == "postgresql":
+            return func.to_char(func.timezone("Asia/Seoul", func.to_timestamp(events.c.ts)),
+                                "YYYY-MM-DD")
+        return func.date(events.c.ts, "unixepoch", "+9 hours")
+
+    # ---- data encryption key (envelope) -------------------------------
     def _load_or_create_dek(self) -> bytes:
-        row = self._db.execute("SELECT v FROM kv WHERE k='dek'").fetchone()
-        if row:
-            return self._provider.unwrap(bytes.fromhex(row["v"]))
-        dek = os.urandom(32)
-        with self._db:
-            self._db.execute("INSERT INTO kv(k,v) VALUES('dek',?)",
-                             (self._provider.wrap(dek).hex(),))
-        return dek
+        with self._engine.begin() as conn:
+            cur = self._kv_get(conn, "dek")
+            if cur:
+                try:
+                    return self._provider.unwrap(bytes.fromhex(cur))
+                except Exception as e:
+                    raise RuntimeError(
+                        "cannot unwrap the stored data key — the master key (AXFILTER_DATA_KEY "
+                        "or the KMS key) does not match the one this database was created with"
+                    ) from e
+            dek = os.urandom(32)
+            self._kv_set(conn, "dek", self._provider.wrap(dek).hex())
+            return dek
 
     def rotate_data_key(self) -> int:
-        """Generate a new DEK, re-encrypt every stored original, store the new wrapped DEK.
-
-        Returns the number of re-encrypted rows. Runs in one transaction so a crash
-        leaves either the old or the new key fully in effect.
-        """
+        """New DEK, re-encrypt every stored original, store the new wrapped DEK, atomically."""
         new_dek = os.urandom(32)
         new_aes = AESGCM(new_dek)
-        with self._lock, self._db:
-            rows = self._db.execute(
-                "SELECT id, nonce, original_enc FROM events WHERE original_enc IS NOT NULL").fetchall()
+        with self._lock, self._engine.begin() as conn:
+            rows = conn.execute(
+                select(events.c.id, events.c.nonce, events.c.original_enc)
+                .where(events.c.original_enc.is_not(None))).mappings().all()
             for r in rows:
                 plain = self._aes.decrypt(r["nonce"], r["original_enc"], None)
                 nonce = os.urandom(12)
-                self._db.execute("UPDATE events SET nonce=?, original_enc=? WHERE id=?",
-                                 (nonce, new_aes.encrypt(nonce, plain, None), r["id"]))
-            self._db.execute("INSERT OR REPLACE INTO kv(k,v) VALUES('dek',?)",
-                             (self._provider.wrap(new_dek).hex(),))
+                conn.execute(events.update().where(events.c.id == r["id"]).values(
+                    nonce=nonce, original_enc=new_aes.encrypt(nonce, plain, None)))
+            self._kv_set(conn, "dek", self._provider.wrap(new_dek).hex())
             self._aes = new_aes
         return len(rows)
 
@@ -105,113 +172,103 @@ class Store:
 
     # ---- policy -------------------------------------------------------
     def get_policy(self) -> Policy:
-        row = self._db.execute("SELECT v FROM kv WHERE k='policy'").fetchone()
-        return Policy.model_validate_json(row["v"]) if row else Policy()
+        with self._engine.connect() as conn:
+            v = self._kv_get(conn, "policy")
+        return Policy.model_validate_json(v) if v else Policy()
 
     def set_policy(self, policy: Policy) -> None:
-        with self._lock, self._db:
-            self._db.execute("INSERT OR REPLACE INTO kv(k,v) VALUES('policy',?)",
-                             (policy.model_dump_json(),))
+        with self._lock, self._engine.begin() as conn:
+            self._kv_set(conn, "policy", policy.model_dump_json())
 
     # ---- events -------------------------------------------------------
     def add_event(self, *, service, user, ip, group, direction, action, reason,
                   finding_types, latency_ms, masked_text, original, ts=None) -> int:
         nonce = os.urandom(12)
         enc = self._aes.encrypt(nonce, original.encode(), None) if finding_types else None
-        with self._lock, self._db:
-            cur = self._db.execute(
-                "INSERT INTO events(ts,service,user,ip,grp,direction,action,reason,"
-                "finding_types,finding_count,latency_ms,masked_text,nonce,original_enc) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (ts or int(time.time()), service, user, ip, group, direction, action, reason,
-                 json.dumps(finding_types), len(finding_types), latency_ms, masked_text,
-                 nonce if enc else None, enc))
-            return cur.lastrowid
+        with self._lock, self._engine.begin() as conn:
+            r = conn.execute(events.insert().values(
+                ts=ts or int(time.time()), service=service, user=user, ip=ip, grp=group,
+                direction=direction, action=action, reason=reason,
+                finding_types=json.dumps(finding_types), finding_count=len(finding_types),
+                latency_ms=latency_ms, masked_text=masked_text,
+                nonce=nonce if enc else None, original_enc=enc))
+            return r.inserted_primary_key[0]
 
-    def get_event(self, event_id: int) -> sqlite3.Row | None:
-        return self._db.execute("SELECT * FROM events WHERE id=?", (event_id,)).fetchone()
+    def get_event(self, event_id: int):
+        with self._engine.connect() as conn:
+            return conn.execute(select(events).where(events.c.id == event_id)).mappings().first()
 
-    def decrypt_original(self, row: sqlite3.Row) -> str | None:
-        if row["original_enc"] is None:
+    def decrypt_original(self, row) -> str | None:
+        if row is None or row["original_enc"] is None:
             return None
         return self._aes.decrypt(row["nonce"], row["original_enc"], None).decode()
 
     def list_events(self, limit: int, offset: int, action: str | None) -> list[dict]:
-        q = ("SELECT id,ts,service,user,ip,grp,direction,action,reason,finding_types,"
-             "masked_text FROM events")
-        args: list = []
+        q = select(events.c.id, events.c.ts, events.c.service, events.c.user, events.c.ip,
+                   events.c.grp, events.c.direction, events.c.action, events.c.reason,
+                   events.c.finding_types, events.c.masked_text)
         if action:
-            q += " WHERE action=?"
-            args.append(action)
-        q += " ORDER BY id DESC LIMIT ? OFFSET ?"
-        rows = self._db.execute(q, (*args, limit, offset)).fetchall()
+            q = q.where(events.c.action == action)
+        q = q.order_by(events.c.id.desc()).limit(limit).offset(offset)
+        with self._engine.connect() as conn:
+            rows = conn.execute(q).mappings().all()
         return [{**dict(r), "finding_types": json.loads(r["finding_types"])} for r in rows]
 
     # ---- stats --------------------------------------------------------
-    @staticmethod
-    def _where(since: int, direction: str) -> tuple[str, list]:
-        w, a = "ts >= ?", [since]
-        if direction != "all":
-            w += " AND direction = ?"
-            a.append(direction)
-        return w, a
-
-    _AGG = ("COUNT(*) total, SUM(finding_count>0) detected, "
-            "SUM(action IN ('allow','mask')) allowed, SUM(action='block') blocked, "
-            "SUM(action='mask') masked")
-
     def summary(self, since: int, direction: str) -> dict:
-        w, a = self._where(since, direction)
-        r = self._db.execute(f"SELECT {self._AGG} FROM events WHERE {w}", a).fetchone()
+        with self._engine.connect() as conn:
+            r = conn.execute(select(*self._agg()).where(self._where(since, direction))).mappings().first()
         return _clean(r)
 
     def daily(self, since: int, direction: str) -> list[dict]:
-        w, a = self._where(since, direction)
-        rows = self._db.execute(
-            f"SELECT date(ts,'unixepoch','+9 hours') day, {self._AGG} FROM events "
-            f"WHERE {w} GROUP BY day ORDER BY day", a).fetchall()
-        return [_clean(r) for r in rows]
+        day = self._day_expr().label("day")
+        q = (select(day, *self._agg()).where(self._where(since, direction))
+             .group_by(day).order_by(day))
+        with self._engine.connect() as conn:
+            return [_clean(r) for r in conn.execute(q).mappings().all()]
 
     def by_service(self, since: int, direction: str) -> list[dict]:
-        w, a = self._where(since, direction)
-        rows = self._db.execute(
-            f"SELECT service, {self._AGG}, AVG(latency_ms) avg_latency_ms FROM events "
-            f"WHERE {w} GROUP BY service ORDER BY total DESC", a).fetchall()
-        return [_clean(r) for r in rows]
+        total = func.count().label("total")
+        q = (select(events.c.service, *self._agg(),
+                    func.avg(events.c.latency_ms).label("avg_latency_ms"))
+             .where(self._where(since, direction)).group_by(events.c.service).order_by(total.desc()))
+        with self._engine.connect() as conn:
+            return [_clean(r) for r in conn.execute(q).mappings().all()]
 
     def top(self, since: int, direction: str, by: str, n: int) -> list[dict]:
-        w, a = self._where(since, direction)
+        total = func.count().label("total")
         if by == "group":
-            cols, grp = "grp AS grp", "grp"
-            extra = ", COUNT(DISTINCT user) users"
+            cols = [events.c.grp.label("grp"), func.count(distinct(events.c.user)).label("users")]
+            group_col = events.c.grp
         else:
-            cols, grp = "ip, MAX(user) user, MAX(grp) grp", "ip"
-            extra = ""
-        rows = self._db.execute(
-            f"SELECT {cols}{extra}, {self._AGG} FROM events WHERE {w} "
-            f"GROUP BY {grp} ORDER BY total DESC LIMIT ?", (*a, n)).fetchall()
-        return [_clean(r) for r in rows]
+            cols = [events.c.ip, func.max(events.c.user).label("user"), func.max(events.c.grp).label("grp")]
+            group_col = events.c.ip
+        q = (select(*cols, *self._agg()).where(self._where(since, direction))
+             .group_by(group_col).order_by(total.desc()).limit(n))
+        with self._engine.connect() as conn:
+            return [_clean(r) for r in conn.execute(q).mappings().all()]
 
     # ---- audit log (hash chain) ---------------------------------------
     def audit(self, actor: str, action: str, target: str) -> None:
-        with self._lock, self._db:
-            last = self._db.execute("SELECT hash FROM audit ORDER BY id DESC LIMIT 1").fetchone()
-            prev, ts = (last["hash"] if last else GENESIS), int(time.time())
+        with self._lock, self._engine.begin() as conn:
+            last = conn.execute(select(audit.c.hash).order_by(audit.c.id.desc()).limit(1)).scalar_one_or_none()
+            prev, ts = (last or GENESIS), int(time.time())
             digest = hashlib.sha256(f"{prev}|{ts}|{actor}|{action}|{target}".encode()).hexdigest()
-            self._db.execute(
-                "INSERT INTO audit(ts,actor,action,target,prev_hash,hash) VALUES(?,?,?,?,?,?)",
-                (ts, actor, action, target, prev, digest))
+            conn.execute(audit.insert().values(ts=ts, actor=actor, action=action, target=target,
+                                               prev_hash=prev, hash=digest))
 
     def audit_entries(self, limit: int = 100) -> list[dict]:
-        rows = self._db.execute("SELECT * FROM audit ORDER BY id DESC LIMIT ?", (limit,))
+        with self._engine.connect() as conn:
+            rows = conn.execute(select(audit).order_by(audit.c.id.desc()).limit(limit)).mappings().all()
         return [dict(r) for r in rows]
 
     def verify_audit(self) -> dict:
         prev = GENESIS
-        for r in self._db.execute("SELECT * FROM audit ORDER BY id"):
-            want = hashlib.sha256(
-                f"{prev}|{r['ts']}|{r['actor']}|{r['action']}|{r['target']}".encode()).hexdigest()
-            if r["prev_hash"] != prev or r["hash"] != want:
-                return {"ok": False, "broken_at": r["id"]}
-            prev = r["hash"]
+        with self._engine.connect() as conn:
+            for r in conn.execute(select(audit).order_by(audit.c.id)).mappings():
+                want = hashlib.sha256(
+                    f"{prev}|{r['ts']}|{r['actor']}|{r['action']}|{r['target']}".encode()).hexdigest()
+                if r["prev_hash"] != prev or r["hash"] != want:
+                    return {"ok": False, "broken_at": r["id"]}
+                prev = r["hash"]
         return {"ok": True, "broken_at": None}

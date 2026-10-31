@@ -1,0 +1,43 @@
+# AX Filter stack: PostgreSQL + API + nginx (TLS termination, serves the dashboard).
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: axfilter
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_DB: axfilter
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U axfilter"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: ../server
+    env_file: ../server/.env
+    environment:
+      AXFILTER_DATABASE_URL: postgresql+psycopg2://axfilter:${POSTGRES_PASSWORD:-change-me}@db:5432/axfilter
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - apidata:/data
+    expose:
+      - "8000"
+
+  web:
+    image: nginx:1.27-alpine
+    depends_on:
+      - api
+    ports:
+      - "8443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+      - ../dashboard:/usr/share/nginx/html:ro
+
+volumes:
+  pgdata:
+  apidata:

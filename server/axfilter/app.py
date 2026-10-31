@@ -2,19 +2,20 @@
 from __future__ import annotations
 
 import hmac
-import os
-import secrets
 import time
 from collections import deque
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
+import logging
+
 from .keys import KeyProvider, LocalMasterKeyProvider, provider_from_env
+from .logging_setup import log_event, new_request_id, request_id, setup_logging
 from .policy import Policy, evaluate
+from .settings import Settings
 from .store import Store, load_or_create_key
 
 PERIOD_DAYS = {"today": 1, "week": 7, "month": 30, "quarter": 90}
@@ -36,22 +37,20 @@ class Config:
     cors_origins: tuple[str, ...] = ()        # dashboard origins allowed to call the API
 
 
-def config_from_env() -> Config:
-    data_dir = Path(os.environ.get("AXFILTER_DATA_DIR", "data"))
-    data_dir.mkdir(parents=True, exist_ok=True)
-    keys = {}
-    for role in ROLE_RANK:
-        k = os.environ.get(f"AXFILTER_{role.upper()}_KEY")
-        if not k:
-            k = secrets.token_urlsafe(24)
-            print(f"[axfilter] AXFILTER_{role.upper()}_KEY not set; temporary {role} key: {k}")
-        keys[role] = k
-    local_key = load_or_create_key(data_dir / "data.key")
-    return Config(str(data_dir / "axfilter.db"), local_key, keys,
+def config_from_env(settings: Settings | None = None) -> Config:
+    st = settings or Settings()
+    st.data_dir.mkdir(parents=True, exist_ok=True)
+    setup_logging(st.log_level, st.log_json)
+    # Local master key lives in the data dir (or AXFILTER_DATA_KEY); KMS needs no local key.
+    local_key = load_or_create_key(st.data_dir / "data.key")
+    db = st.database_url or str(st.data_dir / "axfilter.db")
+    return Config(db, local_key, st.resolved_keys(),
                   key_provider=provider_from_env(local_key),
-                  require_tls=os.environ.get("AXFILTER_REQUIRE_TLS", "0") == "1",
-                  trusted_proxy=os.environ.get("AXFILTER_TRUSTED_PROXY", "0") == "1",
-                  cors_origins=tuple(o for o in os.environ.get("AXFILTER_CORS_ORIGINS", "").split(",") if o))
+                  require_tls=st.require_tls, trusted_proxy=st.trusted_proxy,
+                  cors_origins=st.cors_list(),
+                  max_auth_failures=st.max_auth_failures,
+                  auth_window_seconds=st.auth_window_seconds,
+                  auth_lockout_seconds=st.auth_lockout_seconds)
 
 
 class InspectRequest(BaseModel):
@@ -78,15 +77,24 @@ def create_app(cfg: Config) -> FastAPI:
     fails: dict[str, deque] = {}          # client ip -> timestamps of bad keys
     locked: dict[str, float] = {}         # client ip -> lock-until monotonic time
 
+    log = logging.getLogger("axfilter.access")
+
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
+        rid = request.headers.get("X-Request-ID") or new_request_id()
+        request_id.set(rid)
+        t0 = time.perf_counter()
         if cfg.require_tls and not _is_https(request):
             resp = Response("TLS required", status_code=426, media_type="text/plain")
             resp.headers["Upgrade"] = "TLS/1.2, HTTP/1.1"
         else:
             resp = await call_next(request)
+        resp.headers["X-Request-ID"] = rid
         if _is_https(request):
             resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        # metadata only — never the prompt text or detected values
+        log_event(log, "request", method=request.method, path=request.url.path,
+                  status=resp.status_code, ms=round((time.perf_counter() - t0) * 1000, 1))
         resp.headers["X-Content-Type-Options"] = "nosniff"
         resp.headers["X-Frame-Options"] = "DENY"
         resp.headers["Referrer-Policy"] = "no-referrer"

@@ -8,10 +8,11 @@ FastAPI 기반 검사 API.
 
 ```
 cd axfilter/server
-pip install -r requirements.txt
+pip install -e ".[postgres,dev]"       # 패키지 설치 (콘솔 명령 axfilter 생성)
 AXFILTER_ADMIN_KEY=... AXFILTER_VIEWER_KEY=... AXFILTER_AGENT_KEY=... \
-  uvicorn main:app --port 8000      # 키를 생략하면 실행 시 임시 키를 출력
-python -m pytest
+  axfilter serve --port 8000           # 키 생략 시 실행 때 임시 키 출력
+axfilter show-config                   # 적용된 설정 확인(비밀값 마스킹)
+python -m pytest                       # 41건 (SQLite 38 + 실 PostgreSQL 3; PG는 URL 없으면 skip)
 ```
 
 | 역할 | 권한 |
@@ -30,14 +31,24 @@ python -m pytest
   - 로컬: `AXFILTER_DATA_KEY`(hex 64자) 또는 `data/data.key`(0600)
   - KMS: `AXFILTER_KEY_PROVIDER=awskms AXFILTER_KMS_KEY_ID=alias/...` (boto3 필요, EncryptionContext 적용)
   - 키 교체: `POST /v1/keys/rotate` (admin) — 새 DEK 생성 후 모든 원문을 한 트랜잭션에서 재암호화, 감사 로그 기록
-- **TLS**: `./gen_dev_cert.sh`로 개발용 인증서 생성 후 `uvicorn ... --ssl-certfile --ssl-keyfile`
+- **TLS**: `./gen_dev_cert.sh`로 개발용 인증서 생성 후 `axfilter serve --ssl-certfile --ssl-keyfile`
   - `AXFILTER_REQUIRE_TLS=1`이면 평문 HTTP를 426으로 거부, HTTPS 응답에 HSTS 추가
   - TLS 종단 프록시 뒤에서는 `AXFILTER_TRUSTED_PROXY=1`로 `X-Forwarded-Proto` 신뢰
+- **저장소**: SQLite(기본) 또는 **PostgreSQL** — `AXFILTER_DATABASE_URL`로 선택 (SQLAlchemy Core)
+  - 마이그레이션: `alembic upgrade head` (SQLite·PostgreSQL 모두 검증)
+- **설정**: 모든 환경변수는 `AXFILTER_` 접두사 (`axfilter/server/.env.example` 참고), pydantic-settings로 중앙 관리
+- **로깅**: 구조화 JSON 로그 + 요청 ID. 프롬프트 원문·검출값은 로그에 남기지 않음(메타데이터만)
+
+## deploy/
+`docker-compose`로 PostgreSQL + API + nginx(TLS 종단, 대시보드 서빙) 한 묶음 실행. 기동 시 마이그레이션 자동 적용.
+자세한 내용은 `deploy/README.md`.
 
 ## 한계
-- 정규식·체크섬 기반이라 이름, 주소, 비정형 기밀은 검출하지 못함
-- SSO/인증 연동, 부하·고가용성 검증, 외부 보안 점검은 미실시
-- KMS 공급자는 가짜 클라이언트로만 검증했고 실제 AWS 계정으로는 미검증
+- 정규식·체크섬 기반이라 이름, 주소, 비정형 기밀은 검출하지 못함(NER/ML 미구현)
+- SSO/인증 연동, 부하·고가용성 검증, 외부 보안 점검(모의해킹)은 미실시
+- KMS 공급자는 가짜 클라이언트로만 검증, 실제 AWS 계정 미검증
+- Docker 이미지·compose는 파일로 작성·검증(`docker compose config`)했으나 이 환경에선 데몬 미기동으로 컨테이너 실행은 미검증
+- PostgreSQL 경로는 로컬 PostgreSQL 16으로 검증
 
 ## dashboard/
 의존성 없는 단일 페이지 대시보드. 통계 API에 viewer 키로 연결하거나, 임베드된 합성 데모 데이터로 동작합니다.

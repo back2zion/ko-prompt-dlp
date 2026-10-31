@@ -1,5 +1,11 @@
 fastapi
 uvicorn
 cryptography
-pytest
-httpx
+pydantic
+pydantic-settings
+SQLAlchemy
+# optional backends/tools:
+psycopg2-binary   # PostgreSQL
+alembic           # migrations
+pytest            # tests
+httpx             # tests
