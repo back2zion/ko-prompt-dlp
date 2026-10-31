@@ -87,6 +87,11 @@ class InspectRequest(BaseModel):
     direction: Literal["input", "output"] = "input"
 
 
+class IssueKey(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    role: Literal["agent", "viewer", "admin"]
+
+
 def create_app(cfg: Config) -> FastAPI:
     app = FastAPI(title="AX Filter prototype")
     if cfg.cors_origins:
@@ -203,6 +208,12 @@ def create_app(cfg: Config) -> FastAPI:
                     if ROLE_RANK[role] >= ROLE_RANK[min_role]:
                         return Principal(role, role)
                     raise HTTPException(403, "insufficient role")
+            pr = store.lookup_key(x_api_key)   # database-backed named key
+            if pr is not None:
+                fails.pop(ip, None)
+                if ROLE_RANK[pr.role] >= ROLE_RANK[min_role]:
+                    return pr
+                raise HTTPException(403, "insufficient role")
             _note_failure(ip, now)
             raise HTTPException(401, "invalid api key")
         return dep
@@ -304,6 +315,29 @@ def create_app(cfg: Config) -> FastAPI:
     def retention(principal: Principal = Depends(require("admin"))):
         return retention_run(store, original_days=cfg.retention_original_days,
                              event_days=cfg.retention_event_days, actor=str(principal))
+
+    # ---- database-backed named API keys (admin) -------------------------
+    @app.post("/v1/keys")
+    def issue_api_key(body: IssueKey, principal: Principal = Depends(require("admin"))):
+        token = store.issue_key(body.name, body.role)
+        row = store.list_keys()[0]   # newest row (list_keys orders by id desc) is the one just issued
+        store.audit(str(principal), "ISSUE_API_KEY", f"key:{row['id']}")
+        siem.emit("audit.issue_api_key", name="api key issued", actor=str(principal),
+                  target=f"key:{row['id']}", rid=request_id.get())
+        return {"id": row["id"], "name": body.name, "role": body.role, "token": token}
+
+    @app.get("/v1/keys")
+    def list_api_keys(_: str = Depends(require("admin"))):
+        return store.list_keys()
+
+    @app.delete("/v1/keys/{key_id}")
+    def revoke_api_key(key_id: int, principal: Principal = Depends(require("admin"))):
+        if not store.revoke_key(key_id):
+            raise HTTPException(404, "key not found or already revoked")
+        store.audit(str(principal), "REVOKE_API_KEY", f"key:{key_id}")
+        siem.emit("audit.revoke_api_key", name="api key revoked", actor=str(principal),
+                  target=f"key:{key_id}", rid=request_id.get())
+        return {"id": key_id, "revoked": True}
 
     @app.get("/v1/audit")
     def audit(_: str = Depends(require("admin"))):

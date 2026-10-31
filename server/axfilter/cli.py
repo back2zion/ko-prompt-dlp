@@ -63,6 +63,27 @@ def _purge(args) -> int:
     return 0
 
 
+def _apikey(args) -> int:
+    import json as _json
+    from .app import config_from_env
+    from .keys import LocalMasterKeyProvider
+    from .store import Store
+    cfg = config_from_env()
+    store = Store(cfg.db_path, cfg.key_provider or LocalMasterKeyProvider(cfg.data_key))
+    if args.action == "issue":
+        token = store.issue_key(args.name, args.role)
+        store.audit("cli", "ISSUE_API_KEY", f"name:{args.name}")
+        print(token)   # shown once; store only has its hash
+    elif args.action == "revoke":
+        ok = store.revoke_key(args.id)
+        store.audit("cli", "REVOKE_API_KEY", f"key:{args.id}")
+        print("revoked" if ok else "not found or already revoked")
+        return 0 if ok else 1
+    else:  # list
+        print(_json.dumps(store.list_keys(), ensure_ascii=False, indent=2))
+    return 0
+
+
 def _show_config(args) -> int:
     st = Settings()
     red = st.model_dump()
@@ -103,6 +124,18 @@ def main(argv=None) -> int:
 
     pu = sub.add_parser("purge", help="run data retention / purge from env config (no server)")
     pu.set_defaults(fn=_purge)
+
+    ak = sub.add_parser("apikey", help="manage database-backed named API keys")
+    aksub = ak.add_subparsers(dest="action", required=True)
+    aki = aksub.add_parser("issue", help="issue a named key (prints the raw token once)")
+    aki.add_argument("--name", required=True)
+    aki.add_argument("--role", required=True, choices=["agent", "viewer", "admin"])
+    aki.set_defaults(fn=_apikey)
+    akr = aksub.add_parser("revoke", help="revoke a key by id")
+    akr.add_argument("--id", type=int, required=True)
+    akr.set_defaults(fn=_apikey)
+    akl = aksub.add_parser("list", help="list issued keys (no secrets)")
+    akl.set_defaults(fn=_apikey)
 
     sc = sub.add_parser("show-config", help="print resolved settings (secrets redacted)")
     sc.set_defaults(fn=_show_config)

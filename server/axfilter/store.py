@@ -336,6 +336,19 @@ class Store:
                 prev = r["hash"]
         return {"ok": True, "broken_at": None}
 
+    # ---- database-backed API keys (see apikeys.py) --------------------
+    def issue_key(self, name: str, role: str) -> str:
+        return apikeys.issue_key(self, name, role)
+
+    def revoke_key(self, key_id: int) -> bool:
+        return apikeys.revoke_key(self, key_id)
+
+    def list_keys(self) -> list[dict]:
+        return apikeys.list_keys(self)
+
+    def lookup_key(self, token: str):
+        return apikeys.lookup(self, token)
+
 
 def retention_run(store: Store, *, original_days: int, event_days: int,
                   actor: str = "system", now: int | None = None) -> dict:
@@ -356,3 +369,8 @@ def retention_run(store: Store, *, original_days: int, event_days: int,
         store.audit(actor, "PURGE_EVENTS", f"before_ts={before};count={m}")
         out["purged_events"] = m
     return out
+
+
+# Imported last so the api_keys table is registered on `metadata` before any
+# Store() runs metadata.create_all(); apikeys imports `metadata` from here.
+from . import apikeys  # noqa: E402
