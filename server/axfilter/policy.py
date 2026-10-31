@@ -33,7 +33,7 @@ class Policy(BaseModel):
     type_actions: dict[str, Action] = Field(default_factory=lambda: {
         "RRN": "block", "CARD": "block", "PHONE": "mask",
         "EMAIL": "mask", "BIZNO": "mask", "PASSPORT": "block",
-        "SECRET": "block", "NAME": "mask", "ADDRESS": "mask", "KEYWORD": "block",
+        "SECRET": "block", "NAME": "mask", "ADDRESS": "mask", "KEYWORD": "block",  # nosec B105 - action enum, not a password
     })
     detect_names: bool = True
     detect_addresses: bool = True

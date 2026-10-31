@@ -14,7 +14,7 @@ LABELS = {
     "EMAIL": "이메일",
     "BIZNO": "사업자등록번호",
     "PASSPORT": "여권번호",
-    "SECRET": "자격증명/비밀키",
+    "SECRET": "자격증명/비밀키",  # nosec B105 - display label, not a password
     "NAME": "이름",
     "ADDRESS": "주소",
     "KEYWORD": "사내 키워드",

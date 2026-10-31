@@ -47,7 +47,7 @@ def register_gateway(app, cfg, store, siem, require):
                          x_axfilter_user: str = Header(default="gateway"),
                          _=Depends(require("agent"))):
         t0 = time.perf_counter()
-        ip = request.client.host if request.client else "0.0.0.0"
+        ip = request.client.host if request.client else "0.0.0.0"  # nosec B104 - fallback IP label, not a socket bind
         policy = store.get_policy()
         messages = body.get("messages") or []
         action, types, new_messages = _inspect_messages(policy, messages, ip)

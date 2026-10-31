@@ -66,7 +66,7 @@ def main(argv=None) -> int:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("serve", help="run the API server")
-    s.add_argument("--host", default="0.0.0.0")
+    s.add_argument("--host", default="0.0.0.0")  # nosec B104 - container bind; nginx terminates TLS in front
     s.add_argument("--port", type=int, default=8000)
     s.add_argument("--ssl-certfile")
     s.add_argument("--ssl-keyfile")

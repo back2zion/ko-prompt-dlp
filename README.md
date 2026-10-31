@@ -88,6 +88,16 @@ ISMS-P / ISO 27001 심사 대응용 증적 자료를 생성합니다(인증 보�
 `docker-compose`로 PostgreSQL + API + nginx(TLS 종단, 대시보드 서빙) 한 묶음 실행. 기동 시 마이그레이션 자동 적용.
 자세한 내용은 `deploy/README.md`.
 
+## 보안·인증 준비 (security/, deploy/aws/)
+- **SAST/의존성 스캔**: `security/scan.sh` — bandit(MED/HIGH 0건) + pip-audit(**axfilter 의존성 취약점 0건**)
+- **문서**: 위협모델(STRIDE), 보안 자가점검(코드 매핑), 모의해킹 ROE, 인증 준비(GS/ISMS-P/CC/조달) — `security/`
+- **AWS KMS**: Terraform(KMS 키·최소권한 IAM) + `verify_aws_kms.py`(실계정 wrap/unwrap·EncryptionContext 검증) — `deploy/aws/`
+- **실모델 NER 벤치**: 권장 모델·라벨맵·실행법 — `server/bench/NER_MODELS.md`, `axfilter bench --ner-model <모델>`
+- **CI**(`.github/workflows/axfilter-ci.yml`): 테스트(SQLite+PostgreSQL) + bandit + pip-audit, main 푸시 시 실 AWS KMS 검증(OIDC 역할 구성 시)
+
+> 실제 AWS 계정 검증·실모델 벤치·모의해킹·GS/ISMS-P/CC 인증은 **코드로 끝나지 않는 환경/조직 영역**입니다.
+> 위 준비물은 그 작업을 턴키로 만들기 위한 것이며, 본 저장소에서 실행 검증한 것은 SAST·의존성 스캔·moto 기반 KMS 검증까지입니다.
+
 ## 한계
 - 이름·주소는 규칙·사전 기반이라 재현율이 제한적. 트랜스포머 NER 어댑터를 제공하나 **실제 모델은 미구동**(HuggingFace 접근 차단 환경) — 어댑터·라벨매핑·병합만 단위 검증. 벤치마크 수치는 합성 데이터 기준
 - 부하·고가용성 검증, 외부 보안 점검(모의해킹)은 미실시
