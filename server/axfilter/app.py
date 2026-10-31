@@ -18,6 +18,7 @@ from .oidc import Principal, ROLE_RANK as OIDC_RANK, verifier_from_settings
 from .siem import SiemForwarder
 from .logging_setup import log_event, new_request_id, request_id, setup_logging
 from .policy import Policy, evaluate
+from .ratelimit import RateLimiter
 from .settings import Settings
 from .store import Store, load_or_create_key
 
@@ -44,6 +45,9 @@ class Config:
     gateway_upstream_key: str = ""            # provider API key injected by the gateway
     http_client: object | None = None         # injected httpx.Client (testing)
     ner_recognizers: list | None = None       # extra recognizer callables (e.g. transformer NER)
+    rate_per_sec: float = 20.0                # token-bucket burst/rate per client; 0 = unlimited
+    rate_per_day: int = 100_000               # per-client daily quota; 0 = unlimited
+    rate_limiter: object | None = None        # injected RateLimiter (testing)
 
 
 def config_from_env(settings: Settings | None = None) -> Config:
@@ -67,7 +71,8 @@ def config_from_env(settings: Settings | None = None) -> Config:
                   siem=SiemForwarder(sink=st.siem_sink, fmt=st.siem_format, target=st.siem_target),
                   oidc=verifier_from_settings(st),
                   gateway_upstream=st.gateway_upstream, gateway_upstream_key=st.gateway_upstream_key,
-                  ner_recognizers=ner_recognizers)
+                  ner_recognizers=ner_recognizers,
+                  rate_per_sec=st.rate_per_sec, rate_per_day=st.rate_per_day)
 
 
 class InspectRequest(BaseModel):
@@ -98,6 +103,42 @@ def create_app(cfg: Config) -> FastAPI:
     locked: dict[str, float] = {}         # client ip -> lock-until monotonic time
 
     log = logging.getLogger("axfilter.access")
+
+    # ---- per-client rate limiting + daily quota ------------------------
+    # Registered before security_headers so that middleware stays outermost and
+    # decorates the 429 with the standard security headers. Covers the write
+    # paths (POST /v1/inspect and /gateway/*); GET stats and /healthz are exempt.
+    import hashlib as _hashlib
+    import math as _math
+    from fastapi.responses import JSONResponse
+
+    limiter: RateLimiter = cfg.rate_limiter or RateLimiter(cfg.rate_per_sec, cfg.rate_per_day)
+
+    def _rl_key(request: Request) -> str:
+        k = request.headers.get("x-api-key")
+        if k:
+            return "k:" + _hashlib.sha256(k.encode()).hexdigest()[:16]
+        auth = request.headers.get("authorization", "")
+        if auth.lower().startswith("bearer "):
+            return "b:" + _hashlib.sha256(auth[7:].strip().encode()).hexdigest()[:16]
+        return "ip:" + (request.client.host if request.client else "unknown")
+
+    @app.middleware("http")
+    async def rate_limit(request: Request, call_next):
+        path = request.url.path
+        if limiter.enabled and request.method == "POST" and (
+                path == "/v1/inspect" or path.startswith("/gateway")):
+            dec = limiter.check(_rl_key(request))
+            if not dec.allowed:
+                retry_after = max(1, _math.ceil(dec.retry_after))
+                siem.emit("ratelimit.exceeded", action="block", name="rate limit exceeded",
+                          src=(request.client.host if request.client else "unknown"),
+                          path=path, reason=dec.reason, rid=request_id.get())
+                return JSONResponse(
+                    {"detail": "rate limit exceeded", "reason": dec.reason,
+                     "retry_after": retry_after},
+                    status_code=429, headers={"Retry-After": str(retry_after)})
+        return await call_next(request)
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):

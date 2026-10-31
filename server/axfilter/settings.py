@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     auth_window_seconds: float = 300.0
     auth_lockout_seconds: float = 300.0
 
+    # Per-client rate limiting + daily quota (0 = unlimited)
+    rate_per_sec: float = 20.0        # token-bucket burst/rate per client
+    rate_per_day: int = 100000        # per-client requests per 24h
+
     log_level: str = "INFO"
     log_json: bool = True
 
